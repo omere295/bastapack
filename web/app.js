@@ -429,7 +429,8 @@ function renderDeliver() {
   const fresh = r ? stops.filter((o) => !inRoute.has(o.id)) : [];
   const unfound = new Set(r ? r.unfound : []);
   const unpacked = stops.filter((o) => !isPacked(o)).length;
-  const back = (r ? r.end_mode : setting("route_end", "shop")) === "shop";
+  const endMode = r ? r.end_mode : setting("route_end", "shop");
+  const endLabel = endMode === "shop" ? "חזרה לחנות" : endMode === "custom" ? "סיום: " + ((r && r.end_label) || setting("route_end_address", "")) : null;
   const legsOk = r && r.legs && r.legs.length && !fresh.length;
   h += '<div class="panel route-head"><div class="print-only"><img src="logo-white.png" alt="" class="print-logo"></div>' +
     '<h2 class="num">' + esc(dayLabel(day)) + " · " + stops.length + " עצירות" + (legsOk ? " · " + hm(r.total_seconds) + " נסיעה · " + fmt(r.total_meters / 1000, 1) + " ק״מ" : "") + "</h2>" +
@@ -455,7 +456,7 @@ function renderDeliver() {
       '<a class="btn small" href="' + esc(nav) + '" target="_blank" rel="noopener">Waze</a>' +
       (r ? '<span class="updown"><button class="ghost" data-act="mv:' + day + ":" + o.id + ':-1" aria-label="למעלה" ' + (i ? "" : "disabled") + '>▲</button><button class="ghost" data-act="mv:' + day + ":" + o.id + ':1" aria-label="למטה" ' + (i < stops.length - 1 ? "" : "disabled") + ">▼</button></span>" : "") + "</div></div>";
   });
-  if (back) h += '<div class="stop start"><span class="n">⌂</span><div>' + (legsOk ? '<div class="stamp num">' + mins(r.legs[r.legs.length - 1].seconds) + " דק׳ מהעצירה האחרונה</div>" : "") + "<b>חזרה לחנות</b></div><span></span></div>";
+  if (endLabel) h += '<div class="stop start"><span class="n">' + (endMode === "shop" ? "⌂" : "◎") + "</span><div>" + (legsOk ? '<div class="stamp num">' + mins(r.legs[r.legs.length - 1].seconds) + " דק׳ מהעצירה האחרונה</div>" : "") + "<b>" + esc(endLabel) + "</b></div><span></span></div>";
   return h + "</div>";
 }
 
@@ -541,7 +542,10 @@ function renderSettings() {
   h += "</div>";
   // route end
   const re = setting("route_end", "shop");
-  h += '<div class="panel"><h2>סוף מסלול המשלוחים</h2><div class="seg" role="group"><button data-act="route:shop" aria-pressed="' + (re === "shop") + '">חזרה לחנות</button><button data-act="route:last_stop" aria-pressed="' + (re === "last_stop") + '">בעצירה האחרונה</button></div></div>';
+  h += '<div class="panel"><h2>סוף מסלול המשלוחים</h2><div class="seg" role="group"><button data-act="route:shop" aria-pressed="' + (re === "shop") + '">חזרה לחנות</button><button data-act="route:last_stop" aria-pressed="' + (re === "last_stop") + '">בעצירה האחרונה</button><button data-act="route:custom" aria-pressed="' + (re === "custom") + '">כתובת אחרת</button></div>' +
+    (re === "custom" ? '<div class="rowform"><div class="field"><label for="end-addr">כתובת סיום (רחוב, מספר, עיר)</label><input id="end-addr" value="' + esc(setting("route_end_address", "")) + '" placeholder="למשל: הרצל 10, ראשון לציון"></div><button class="btn small sea" data-act="end-addr-save">שמירה</button></div>' +
+      (setting("route_end_address", "") ? "" : '<div class="msg bad">הזינו כתובת ושמרו, אחרת לא ניתן לחשב מסלול.</div>') : "") +
+    '<p class="muted">השינוי חל על המסלול הבא שמחשבים.</p></div>';
   // clients
   h += '<div class="panel"><h2>מורנינג</h2><p>לקוחות עסקיים מגיעים ממורנינג. הסנכרון מוסיף לקוחות חדשים ומעדכן פרטי חברה, טלפון וכתובת. שמות העסקים שערכתם כאן נשמרים.</p>' +
     '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div></div>';
@@ -805,6 +809,7 @@ document.addEventListener("click", (e) => {
     case "hol-add": { const d = gv("hol-d"); if (!d) { toast("בחרו תאריך"); break; } act(() => B.addHoliday(d, gv("hol-n")), { okToast: "נוסף" }); break; }
     case "hol-del": act(() => B.removeHoliday(rest), { okToast: "הוסר" }); break;
     case "route": act(() => B.setSetting("route_end", b), { okToast: "נשמר" }); break;
+    case "end-addr-save": { const v = gv("end-addr"); if (!v) { toast("הזינו כתובת"); break; } act(() => B.setSetting("route_end_address", v), { okToast: "כתובת הסיום נשמרה" }); break; }
     case "client-add": {
       const name = gv("cl-b"); if (!name) { toast("חסר שם העסק"); break; }
       const st = gv("cl-st"), m = st.match(/^(.*?)\s+(\d+\S*)$/);

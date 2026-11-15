@@ -204,7 +204,8 @@ export class DemoBackend {
     else ids.reverse(); // the demo "optimizer" just picks a different order
     const legs = ids.map((_, i) => ({ seconds: 420 + i * 60, meters: 2500 + i * 300 })).concat([{ seconds: 600, meters: 3000 }]);
     const r = { day: body.day, stop_ids: ids, legs, points: Object.fromEntries(ids.map((id, i) => [id, { lat: 32.06 + i / 100, lng: 34.77 }])), unfound: [],
-      end_mode: "shop", optimized: body.action === "optimize", computed_at: new Date().toISOString(),
+      end_mode: (this.db.settings.find((x) => x.key === "route_end") || {}).value || "shop",
+      end_label: (this.db.settings.find((x) => x.key === "route_end_address") || {}).value || null, optimized: body.action === "optimize", computed_at: new Date().toISOString(),
       total_seconds: legs.reduce((s, l) => s + l.seconds, 0), total_meters: legs.reduce((s, l) => s + l.meters, 0) };
     (this.db.routes ||= {})[body.day] = r;
     return JSON.parse(JSON.stringify(r));

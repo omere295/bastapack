@@ -1,7 +1,8 @@
 // Delivery route for one day. Called by the app (any staff login).
 //   {action: "optimize", day}          → find every address and put the stops in the quickest driving order
 //   {action: "reorder", day, order}    → keep the order staff chose and recalculate the drive times
-// Starts at the shop address (settings), ends back at the shop or at the last stop (settings: route_end).
+// Starts at the shop address (settings). Ends back at the shop, at the last stop, or at a custom address
+// (settings: route_end = shop | last_stop | custom, route_end_address).
 // Uses Google Geocoding (results cached) and Google Routes (computeRoutes). Secret: GOOGLE_MAPS_API_KEY.
 // Up to 25 stops Google picks the order; above that the order comes from straight-line distances
 // (nearest neighbour + 2-opt) and Google still gives the drive times.
@@ -67,11 +68,11 @@ async function legsFor(points: P[]) {
 
 // ---------- order without Google (more than 25 stops) ----------
 const dist = (a: P, b: P) => { const R = 6371, x = (b.lng - a.lng) * Math.PI / 180 * Math.cos((a.lat + b.lat) * Math.PI / 360), y = (b.lat - a.lat) * Math.PI / 180; return R * Math.hypot(x, y); };
-function heuristicOrder(start: P, stops: P[], back: boolean) {
+function heuristicOrder(start: P, stops: P[], end: P | null) {
   const left = stops.map((_, i) => i), tour: number[] = [];
   let cur = start;
   while (left.length) { let bi = 0; left.forEach((s, k) => { if (dist(cur, stops[s]) < dist(cur, stops[left[bi]])) bi = k; }); tour.push(left[bi]); cur = stops[left[bi]]; left.splice(bi, 1); }
-  const pt = (k: number) => (k < 0 ? start : k >= tour.length ? (back ? start : null) : stops[tour[k]]);
+  const pt = (k: number) => (k < 0 ? start : k >= tour.length ? end : stops[tour[k]]);
   const len = () => { let s = 0; for (let k = -1; k < tour.length; k++) { const a = pt(k), b = pt(k + 1); if (a && b) s += dist(a, b); } return s; };
   for (let improved = true, guard = 0; improved && guard < 50; guard++) {
     improved = false;
@@ -90,9 +91,13 @@ async function build(day: string, wanted: string[] | null) {
   if (!KEY) throw new UserError("מפתח Google Maps עוד לא הוגדר ב-Supabase");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new UserError("תאריך לא תקין");
   const settings = Object.fromEntries((await db("/rest/v1/settings?select=key,value")).map((s: any) => [s.key, s.value]));
-  const endMode = settings.route_end === "last_stop" ? "last_stop" : "shop";
+  const endMode = ["last_stop", "custom"].includes(settings.route_end) ? settings.route_end : "shop";
   const shop = await geocode(String(settings.shop_address || "מקווה ישראל 22, תל אביב") + ", ישראל");
   if (!shop) throw new UserError("לא נמצאה כתובת החנות. בדקו אותה בהגדרות.");
+  const endLabel = endMode === "custom" ? String(settings.route_end_address || "").trim() : null;
+  if (endMode === "custom" && !endLabel) throw new UserError("בחרתם לסיים בכתובת אחרת אבל לא הוזנה כתובת. הוסיפו אותה בהגדרות.");
+  const endP: P | null = endMode === "shop" ? shop : endMode === "custom" ? await geocode(endLabel + ", ישראל") : null;
+  if (endMode === "custom" && !endP) throw new UserError("כתובת סיום המסלול לא נמצאה במפה: " + endLabel);
   const orders = await db("/rest/v1/orders?select=id,kind,address,clients(address)&deleted_at=is.null&pickup=is.false&delivery_date=eq." + day);
   const found: { id: string; p: P }[] = []; const unfound: string[] = [];
   for (const o of orders) {
@@ -106,19 +111,19 @@ async function build(day: string, wanted: string[] | null) {
     const pos = new Map(wanted.map((id, i) => [id, i]));
     seq = found.map((_, i) => i).sort((a, b) => (pos.get(found[a].id) ?? 1e9) - (pos.get(found[b].id) ?? 1e9));
   } else if (found.length <= 1) seq = found.map((_, i) => i);
-  else if (endMode === "shop" && found.length <= 25) {
-    const r = await computeRoute(shop, shop, found.map((f) => f.p), true);
+  else if (endP && found.length <= 25) {
+    const r = await computeRoute(shop, endP, found.map((f) => f.p), true);
     seq = r.order.length === found.length ? r.order : found.map((_, i) => i); legs = r.order.length === found.length ? r.legs : [];
   } else if (endMode === "last_stop" && found.length <= 26) {
     let far = 0; found.forEach((f, i) => { if (dist(shop, f.p) > dist(shop, found[far].p)) far = i; });
     const rest = found.map((_, i) => i).filter((i) => i !== far);
     const r = await computeRoute(shop, found[far].p, rest.map((i) => found[i].p), true);
     seq = (r.order.length === rest.length ? r.order.map((k) => rest[k]) : rest).concat(far); legs = r.order.length === rest.length ? r.legs : [];
-  } else seq = heuristicOrder(shop, found.map((f) => f.p), endMode === "shop");
-  const path = [shop, ...seq.map((i) => found[i].p), ...(endMode === "shop" ? [shop] : [])];
+  } else seq = heuristicOrder(shop, found.map((f) => f.p), endP);
+  const path = [shop, ...seq.map((i) => found[i].p), ...(endP ? [endP] : [])];
   if (!legs.length && path.length > 1) legs = await legsFor(path);
   const row = {
-    day, stop_ids: [...seq.map((i) => found[i].id), ...unfound], legs, unfound, end_mode: endMode, optimized: !wanted,
+    day, stop_ids: [...seq.map((i) => found[i].id), ...unfound], legs, unfound, end_mode: endMode, end_label: endLabel, optimized: !wanted,
     points: Object.fromEntries(found.map((f) => [f.id, f.p])),
     total_seconds: legs.reduce((s, l) => s + l.seconds, 0), total_meters: legs.reduce((s, l) => s + l.meters, 0), computed_at: new Date().toISOString(),
   };
