@@ -210,7 +210,7 @@ function renderLogin() {
 const TITLES = { home: "", private: "פרטי", business: "עסקי", deliver: "משלוחים", diffs: "הפרשי מחיר", trash: "סל מחזור", log: "יומן פעולות", settings: "הגדרות", review: "לבדיקה" };
 function renderHeader() {
   return '<header class="top"><div class="wrap">' +
-    '<button class="brand" data-act="go:home" aria-label="מסך הבית">בסטה</button>' +
+    '<button class="brand" data-act="go:home" aria-label="בסטה דגים · מסך הבית"><img src="logo-white.png" alt="בסטה דגים"></button>' +
     '<div class="crumb">' + esc(TITLES[ui.screen] || "") + "</div>" +
     (ui.screen !== "home" ? '<button class="ghost" data-act="go:home">חזרה</button>' : "") +
     '<span class="role ' + (isAdmin() ? "admin" : "") + '">' + (isAdmin() ? "מנהל" : "עובד") + "</span>" +
