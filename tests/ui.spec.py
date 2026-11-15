@@ -110,8 +110,8 @@ with sync_playwright() as p:
     for i in range(pg.locator(fc + " .winput").count()):
         inp = pg.locator(fc + " .winput").first; inp.fill("2.5"); inp.press("Enter"); pg.wait_for_timeout(150)
     pg.locator(fc + " .packbox").click(); pg.wait_for_timeout(300)
-    pg.locator(fc + " .info").click()
-    pg.locator(fc + " button:has-text('FIRE')").click()
+    check(pg.locator(fc + " .firemini").count() == 1, "packed business order shows FIRE without opening it")
+    pg.locator(fc + " .firemini").click()
     pg.click(".modal [data-act='m-fire']"); pg.wait_for_timeout(400)
     check("הופקה" in pg.inner_text(fc), "FIRE creates the delivery note and locks the order")
     # employee view

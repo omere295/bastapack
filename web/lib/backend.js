@@ -85,13 +85,24 @@ export class SupabaseBackend {
     const [orders, products, clients, holidays, settings, prices, review] = await Promise.all([
       q("orders", "?select=*,order_items(*)&or=(delivery_date.gte." + sinceDate + ",status.eq.new)&order=delivery_date,number"),
       q("products", "?select=*&order=name"),
-      q("clients", "?select=*&order=business_name"),
+      this._all("/rest/v1/clients?select=*&order=business_name"),
       q("holidays", "?select=*&order=day"),
       q("settings", "?select=*"),
       admin ? q("client_prices", "?select=*") : Promise.resolve([]),
       admin ? q("email_inbox", "?select=id,gmail_id,received_at,subject,problem,parsed&status=eq.review&order=received_at.desc") : Promise.resolve([]),
     ]);
     return { orders, products, clients, holidays, settings, prices, review };
+  }
+
+  /** Reads every row of a list, 1000 at a time (the server returns at most 1000 per request). */
+  async _all(path) {
+    const out = [];
+    for (let from = 0; from < 50000; from += 1000) {
+      const page = await this._req(path + "&limit=1000&offset=" + from);
+      out.push(...page);
+      if (page.length < 1000) break;
+    }
+    return out;
   }
 
   loadLog() { return this._req("/rest/v1/activity_log?select=*&order=at.desc&limit=200"); }

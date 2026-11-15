@@ -311,7 +311,8 @@ function renderCard(o) {
   let h = '<article class="' + cls + '" id="card-' + o.id + '"><div class="ch ' + (sel ? "" : "nosel") + '">';
   if (sel) h += '<label class="selbox"><input type="checkbox" aria-label="בחירת הזמנה ' + esc(o.number) + '" data-act="sel:' + o.id + '" ' + (ui.selected.has(o.id) ? "checked" : "") + "></label>";
   h += '<button class="info" data-act="toggle:' + o.id + '" aria-expanded="' + open + '"><span class="l1">' + l1 + '</span><span class="l2">' + l2 + "</span>" + l3 + "</button>" +
-    '<div class="packcell"><div><button class="packbox ' + (!isPacked(o) && allConfirmed ? "ready" : "") + '" data-act="pack:' + o.id + '" aria-pressed="' + isPacked(o) + '" aria-label="' + (isPacked(o) ? "ארוזה. לחיצה לביטול אריזה" : "סימון כארוזה") + '">' + CHECK + '</button><div class="packlbl">' + (isPacked(o) ? "ארוזה" : "ארוזה?") + "</div></div></div></div>";
+    '<div class="packcell"><div><button class="packbox ' + (!isPacked(o) && allConfirmed ? "ready" : "") + '" data-act="pack:' + o.id + '" aria-pressed="' + isPacked(o) + '" aria-label="' + (isPacked(o) ? "ארוזה. לחיצה לביטול אריזה" : "סימון כארוזה") + '">' + CHECK + '</button><div class="packlbl">' + (isPacked(o) ? "ארוזה" : "ארוזה?") + "</div>" +
+    (isAdmin() && o.kind === "business" && o.status === "packed" ? '<button class="firemini" data-act="fire:' + o.id + '">FIRE</button>' : "") + "</div></div></div>";
   if (open) h += renderBody(o);
   return h + "</article>";
 }
