@@ -35,6 +35,12 @@ jobs:
     environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp file versions so tablets always load the newest app
+        run: |
+          V=${GITHUB_SHA::7}
+          sed -i -E "s#(href=\"styles\.css)\"#\1?v=$V\"#; s#(src=\"app\.js)\"#\1?v=$V\"#" web/index.html
+          sed -i -E "s#(from \"\./[^\"]+\.js)\"#\1?v=$V\"#g; s#logo-white\.png#logo-white.png?v=$V#g" web/*.js web/lib/*.js
+          grep -c "v=$V" web/index.html web/app.js
       - uses: actions/upload-pages-artifact@v3
         with: { path: web }
       - id: deployment
