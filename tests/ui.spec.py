@@ -83,6 +83,13 @@ with sync_playwright() as p:
     pg.click(".brand"); pg.click("text=הגדרות")
     check(pg.locator("text=לקוחות עסקיים").count() > 0, "settings page opens")
     pg.screenshot(path="/tmp/ui-settings.png", full_page=True)
+    pg.click(".brand"); pg.click("text=מיילים לבדיקה")
+    check("לא תואם" in pg.inner_text("main"), "needs-review email shows its problem")
+    pg.click("text=יצירת הזמנה ידנית")
+    check(pg.input_value("#f-name") == "רון כץ" and pg.locator("#r-p-1").count() == 1, "manual order prefilled from the email")
+    pg.click(".modal button:has-text('ביטול')")
+    pg.click("text=סומן כטופל"); pg.wait_for_timeout(300)
+    check("אין מיילים לבדיקה" in pg.inner_text("main"), "email marked as handled")
     pg.click(".brand"); pg.click(".tile:has-text('משלוחים')")
     check(pg.locator(".stop").count() >= 3, "deliver page lists stops")
     # employee view

@@ -66,7 +66,12 @@ export function demoSeed(today = todayIL()) {
     ["c1", "פילה סלמון נורווגי לפי משקל", 128], ["c1", "סשימי טונה", 360], ["c2", "פילה לברק טרי", 205],
     ["c3", "סשימי טונה", 365], ["c3", "סשימי סלמון נורווגי", 185],
   ].map(([client_id, n, price]) => ({ client_id, product_id: P(n).id, price }));
-  return { orders, products: clone(PRODUCTS), clients, prices, holidays: [], settings: [{ key: "route_end", value: "shop" }, { key: "shop_address", value: "מקווה ישראל 22, תל אביב" }], log: [], seq: { b: 1004, m: 501 } };
+  const review = [{ id: "r1", gmail_id: "demo", received_at: new Date().toISOString(), status: "review", subject: "הזמנה בבסטה דגים תל אביב | משלוח | רון כץ | 342 ₪ | #993",
+    problem: "סכום הפריטים (312.00) לא תואם לסה״כ (342)",
+    parsed: { number: "993", delivery_date: D1, time_window: "09:00-16:00", pickup: false, customer_name: "רון כץ", phone: "0521112233",
+      address: { city: "תל אביב-יפו", street: "בן יהודה", building: "120" }, delivery_fee: 30, total: 342,
+      items: [{ name: "פילה סלמון נורווגי לפי משקל", count: 2, price: 155, kg: 1, note: "", option: "" }, { name: "פילה לברק טרי", count: 1, price: 52, kg: 0.22, note: "", option: "" }] } }];
+  return { review, orders, products: clone(PRODUCTS), clients, prices, holidays: [], settings: [{ key: "route_end", value: "shop" }, { key: "shop_address", value: "מקווה ישראל 22, תל אביב" }], log: [], seq: { b: 1004, m: 501 } };
 }
 
 export class DemoBackend {
@@ -88,6 +93,7 @@ export class DemoBackend {
       orders: this.db.orders.filter((o) => admin || !o.deleted_at).map((o) => ({ ...o, order_items: o.order_items })),
       products: this.db.products, clients: this.db.clients, holidays: this.db.holidays, settings: this.db.settings,
       prices: admin ? this.db.prices : [],
+      review: admin ? this.db.review.filter((r) => r.status === "review") : [],
     });
   }
   async loadLog() { if (this.role !== "admin") fail("פעולה למנהל בלבד"); return clone(this.db.log); }
@@ -156,6 +162,9 @@ export class DemoBackend {
         this._admin(); let n = 0;
         for (const o of this.db.orders) if (a.p_ids.includes(o.id) && !o.deleted_at && o.status !== "fired") { o.deleted_at = new Date().toISOString(); this._log("deleted", o); n++; }
         return n;
+      }
+      case "mark_email_handled": {
+        this._admin(); const r = this.db.review.find((x) => x.id === a.p_id); if (r) r.status = "handled"; return null;
       }
       case "restore_order": {
         this._admin(); const o = this.db.orders.find((x) => x.id === a.p_order);

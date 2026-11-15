@@ -82,15 +82,16 @@ export class SupabaseBackend {
   async loadAll(sinceDate) {
     const admin = this.role === "admin";
     const q = (t, s) => this._req("/rest/v1/" + t + s);
-    const [orders, products, clients, holidays, settings, prices] = await Promise.all([
+    const [orders, products, clients, holidays, settings, prices, review] = await Promise.all([
       q("orders", "?select=*,order_items(*)&or=(delivery_date.gte." + sinceDate + ",status.eq.new)&order=delivery_date,number"),
       q("products", "?select=*&order=name"),
       q("clients", "?select=*&order=business_name"),
       q("holidays", "?select=*&order=day"),
       q("settings", "?select=*"),
       admin ? q("client_prices", "?select=*") : Promise.resolve([]),
+      admin ? q("email_inbox", "?select=id,gmail_id,received_at,subject,problem,parsed&status=eq.review&order=received_at.desc") : Promise.resolve([]),
     ]);
-    return { orders, products, clients, holidays, settings, prices };
+    return { orders, products, clients, holidays, settings, prices, review };
   }
 
   loadLog() { return this._req("/rest/v1/activity_log?select=*&order=at.desc&limit=200"); }

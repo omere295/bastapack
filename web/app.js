@@ -207,7 +207,7 @@ function renderLogin() {
     "</form></div></main>";
 }
 
-const TITLES = { home: "", private: "פרטי", business: "עסקי", deliver: "משלוחים", diffs: "הפרשי מחיר", trash: "סל מחזור", log: "יומן פעולות", settings: "הגדרות" };
+const TITLES = { home: "", private: "פרטי", business: "עסקי", deliver: "משלוחים", diffs: "הפרשי מחיר", trash: "סל מחזור", log: "יומן פעולות", settings: "הגדרות", review: "לבדיקה" };
 function renderHeader() {
   return '<header class="top"><div class="wrap">' +
     '<button class="brand" data-act="go:home" aria-label="מסך הבית">בסטה</button>' +
@@ -226,6 +226,7 @@ function renderScreen() {
     case "trash": return isAdmin() ? renderTrash() : "";
     case "log": return isAdmin() ? renderLog() : "";
     case "settings": return isAdmin() ? renderSettings() : "";
+    case "review": return isAdmin() ? renderReview() : "";
   }
   return "";
 }
@@ -242,6 +243,8 @@ function renderHome() {
     '</div><div class="tiles"><button class="tile" data-act="go:deliver"><b>משלוחים</b><span>עצירות לפי יום משלוח</span></button>';
   if (isAdmin()) {
     const diffs = live().filter((o) => o.kind === "private" && isPacked(o) && orderDiff(o) !== 0).length;
+    const rv = (D.review || []).length;
+    if (rv) h += '<button class="tile" data-act="go:review" style="border-color:var(--danger)"><b style="color:var(--danger)">מיילים לבדיקה</b><span class="num">' + rv + " הזמנות מהאתר שלא נקלטו אוטומטית</span></button>";
     h += '<button class="tile" data-act="go:diffs"><b>הפרשי מחיר</b><span class="num">' + diffs + " הזמנות עם הפרש</span></button>" +
       '<button class="tile" data-act="go:trash"><b>סל מחזור</b><span class="num">' + D.orders.filter((o) => o.deleted_at).length + " הזמנות שנמחקו</span></button>" +
       '<button class="tile" data-act="go:log"><b>יומן פעולות</b><span>מה נעשה ומתי</span></button>' +
@@ -427,7 +430,35 @@ function renderTrash() {
   return h + "</tbody></table></div></div>";
 }
 
-const ACTIONS = { packed: "סימן כארוזה", unpacked: "ביטל אריזה", weight_changed: "שינה משקל", item_added: "הוסיף פריט", item_removed: "הסיר פריט", pickup_on: "סימן איסוף עצמי", pickup_off: "ביטל איסוף עצמי", deleted: "מחק", restored: "שחזר", edited: "ערך פרטים", created: "יצר הזמנה", fired: "הפיק במורנינג" };
+function renderReview() {
+  const rs = D.review || [];
+  let h = '<div class="panel"><h2>מיילים לבדיקה</h2><p>הזמנות מהאתר שהאפליקציה לא קלטה אוטומטית. בדקו את המייל, צרו הזמנה ידנית אם צריך, וסמנו כטופל.</p>';
+  if (!rs.length) return h + '<div class="empty">אין מיילים לבדיקה</div></div>';
+  const f = new Intl.DateTimeFormat("he-IL", { timeZone: TZ, day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+  h += '<div class="list">';
+  for (const r of rs) {
+    const p = r.parsed;
+    h += '<div class="panel" style="gap:8px"><div class="l1"><b>' + esc(r.subject || "מייל") + '</b></div><div class="stamp num">התקבל ' + (r.received_at ? esc(f.format(new Date(r.received_at))) : "") + "</div>" +
+      '<div class="msg bad">' + esc(r.problem || "") + "</div>";
+    if (p) h += '<div class="imeta num">' + esc([p.customer_name, p.phone, p.delivery_date && dayLabel(p.delivery_date), p.pickup ? "איסוף עצמי" : fullAddr(p.address)].filter(Boolean).join(" · ")) + "</div>" +
+      '<div class="imeta">' + (p.items || []).map((i) => esc(i.name + " ×" + i.count + (i.kg ? " (" + i.kg + " ק״ג)" : ""))).join("<br>") + "</div>";
+    h += '<div class="obar"><a class="btn small" href="https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(r.gmail_id) + '" target="_blank" rel="noopener">פתיחה בג׳ימייל</a>' +
+      (p ? '<button class="btn small sea" data-act="review-create:' + r.id + '">יצירת הזמנה ידנית</button>' : "") +
+      '<span class="grow"></span><button class="btn small" data-act="review-done:' + r.id + '">סומן כטופל</button></div></div>';
+  }
+  return h + "</div></div>";
+}
+function openFormFromEmail(rid) {
+  const r = (D.review || []).find((x) => x.id === rid); const p = r && r.parsed; if (!p) return;
+  const byName = Object.fromEntries(D.products.map((x) => [x.name, x]));
+  const d = p.delivery_date && p.delivery_date >= TODAY() ? p.delivery_date : nextDeliveryDay(TODAY(), { inclusive: true, holidays: holidays() });
+  ui.modal = { type: "form", kind: "private", id: null, wide: true,
+    values: { customer_name: p.customer_name, phone: p.phone, pickup: !!p.pickup, delivery_date: d, time_window: p.time_window, ...(p.address || {}) },
+    rows: (p.items || []).map((i) => { const pr = byName[i.name]; return { p: pr ? pr.id : "", a: pr && pr.unit === "kg" ? i.kg : i.count }; }).concat(p.items && p.items.length ? [] : [{}]) };
+  render();
+}
+
+const ACTIONS = { email_imported: "נקלטה ממייל", email_updated: "עודכנה ממייל", packed: "סימן כארוזה", unpacked: "ביטל אריזה", weight_changed: "שינה משקל", item_added: "הוסיף פריט", item_removed: "הסיר פריט", pickup_on: "סימן איסוף עצמי", pickup_off: "ביטל איסוף עצמי", deleted: "מחק", restored: "שחזר", edited: "ערך פרטים", created: "יצר הזמנה", fired: "הפיק במורנינג" };
 const ACTORS = { employee: "עובד", admin: "מנהל", whatsapp: "וואטסאפ", system: "מערכת" };
 function renderLog() {
   let h = '<div class="panel"><h2>יומן פעולות</h2><p>בשלב זה יש כניסה משותפת לעובדים, לכן היומן מציין "עובד" או "מנהל".</p>';
@@ -718,6 +749,8 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "prices": ui.modal = { type: "prices", cid: b, wide: true }; render(); break;
+    case "review-done": act(() => B.rpc("mark_email_handled", { p_id: b }), { okToast: "סומן כטופל" }); break;
+    case "review-create": openFormFromEmail(b); break;
     case "prod-add": {
       const n = gv("pr-n"); if (!n) { toast("חסר שם המוצר"); break; }
       act(() => B.addProduct({ name: n, unit: gv("pr-u") || "kg", site_price: toNum(gv("pr-p")) }), { okToast: "המוצר נוסף" });
