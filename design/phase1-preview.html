@@ -1,0 +1,1085 @@
+<title>BastaPack</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&family=Suez+One&display=swap">
+<style>
+/* Layout: a packing-station tool. Sticky header, then day sections of order cards; one column, wide enough for a tablet held upright. */
+:root {
+  --bg: #EAF0F1;          /* ice */
+  --surface: #FFFFFF;
+  --surface-2: #F4F8F9;
+  --ink: #0F2A33;          /* deep water */
+  --muted: #587079;
+  --line: #D3DFE2;
+  --accent: #CF4F33;       /* salmon flesh */
+  --accent-ink: #FFFFFF;
+  --accent-soft: #FBE6E0;
+  --sea: #1C5D6C;          /* business */
+  --sea-soft: #DDEDF0;
+  --sea-ink: #FFFFFF;
+  --danger-ink: #FFFFFF;
+  --ok: #23774A;
+  --ok-soft: #DFF1E6;
+  --danger: #AE2A20;
+  --danger-soft: #FBE3E0;
+  --pick-bg: #F6EBD4;      /* self-pickup */
+  --pick-line: #DFC48D;
+  --pick-ink: #6E4A0E;
+  --shadow: 0 1px 2px rgba(15, 42, 51, .06), 0 4px 14px rgba(15, 42, 51, .06);
+  --f-display: "Suez One", "IBM Plex Sans Hebrew", "Arial Hebrew", serif;
+  --f-body: "IBM Plex Sans Hebrew", "Arial Hebrew", "Segoe UI", Arial, sans-serif;
+  --r: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B181C; --surface: #12232A; --surface-2: #172C34; --ink: #E3EDEF; --muted: #91A8AF; --line: #24404A;
+    --accent: #F07A5E; --accent-ink: #1A0B06; --accent-soft: #3A1D16; --sea: #5AAFC1; --sea-soft: #15333B; --sea-ink: #061A1F; --danger-ink: #2A0A07;
+    --ok: #6DCB92; --ok-soft: #153626; --danger: #F2897F; --danger-soft: #3C1613;
+    --pick-bg: #33290F; --pick-line: #6A5424; --pick-ink: #F1D69C; --shadow: 0 1px 2px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B181C; --surface: #12232A; --surface-2: #172C34; --ink: #E3EDEF; --muted: #91A8AF; --line: #24404A;
+  --accent: #F07A5E; --accent-ink: #1A0B06; --accent-soft: #3A1D16; --sea: #5AAFC1; --sea-soft: #15333B; --sea-ink: #061A1F; --danger-ink: #2A0A07;
+  --ok: #6DCB92; --ok-soft: #153626; --danger: #F2897F; --danger-soft: #3C1613;
+  --pick-bg: #33290F; --pick-line: #6A5424; --pick-ink: #F1D69C; --shadow: 0 1px 2px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--f-body); font-size: 16px; line-height: 1.45; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+* { box-sizing: border-box; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+#app { min-height: 100%; }
+.wrap { max-width: 980px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* preview strip + header */
+.strip { background: var(--surface-2); color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--line); }
+.strip .wrap { padding-block: 6px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+.strip button { background: var(--surface); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+header.top .wrap { display: flex; align-items: center; gap: 12px; padding-block: 10px; min-height: 60px; }
+.brand { font-family: var(--f-display); font-size: 24px; letter-spacing: .5px; color: var(--accent); background: none; border: 0; padding: 0; }
+.crumb { font-weight: 600; font-size: 18px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.role.admin { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+.ghost { background: none; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; color: var(--ink); }
+.ghost:hover { background: var(--surface-2); }
+
+main { padding-block: 20px 120px; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px 18px; border-radius: 10px; border: 1px solid transparent; font-weight: 600; background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.sea { background: var(--sea); color: var(--sea-ink); border-color: var(--sea); }
+.btn.danger { background: var(--danger); color: var(--danger-ink); border-color: var(--danger); }
+.btn.small { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.linkbtn { background: none; border: 0; color: var(--sea); font-weight: 600; padding: 6px 4px; text-decoration: underline; text-underline-offset: 3px; }
+.linkbtn.danger { color: var(--danger); }
+
+/* login */
+.login { max-width: 420px; margin: 8vh auto 0; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 28px; box-shadow: var(--shadow); display: grid; gap: 16px; }
+.login h1 { font-family: var(--f-display); font-weight: 400; color: var(--accent); font-size: 40px; margin: 0; line-height: 1; }
+.login p { margin: 0; color: var(--muted); }
+.field { display: grid; gap: 6px; }
+.field label { font-size: 14px; font-weight: 600; }
+.field input, .field select, .field textarea { min-height: 48px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+.hint { background: var(--surface-2); border: 1px dashed var(--line); border-radius: 10px; padding: 12px; font-size: 14px; color: var(--muted); display: grid; gap: 8px; }
+.hint .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.err { color: var(--danger); font-size: 14px; font-weight: 600; }
+
+/* home */
+.home { display: grid; gap: 20px; }
+.bigs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.big { border: 0; border-radius: 18px; padding: 28px 24px; min-height: 210px; text-align: start; display: grid; align-content: space-between; gap: 18px; box-shadow: var(--shadow); }
+.big.private { background: var(--accent); color: var(--accent-ink); }
+.big.business { background: var(--sea); color: var(--sea-ink); }
+.big .t { font-family: var(--f-display); font-size: clamp(40px, 8vw, 64px); line-height: 1; }
+.big .en { font-size: 14px; letter-spacing: .14em; opacity: .85; font-weight: 600; }
+.big .s { font-size: 15px; opacity: .95; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; text-align: start; display: grid; gap: 4px; }
+.tile b { font-size: 17px; }
+.tile span { color: var(--muted); font-size: 14px; }
+.tile:hover { border-color: var(--sea); }
+@media (max-width: 560px) { .bigs { grid-template-columns: 1fr; } .big { min-height: 150px; } }
+
+/* section toolbar */
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+.toolbar .grow { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 10px 16px; font-weight: 600; min-height: 44px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+/* day sections */
+.day { margin-bottom: 18px; }
+.dayhead { width: 100%; display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 10px 2px; text-align: start; }
+.dayhead .chev { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); transition: transform .2s; flex: none; }
+.day.closed .chev { transform: rotate(90deg); }
+.dayhead .lbl { font-size: 21px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.dayhead .rel { font-family: var(--f-display); font-weight: 400; color: var(--accent); font-size: 24px; }
+.business-sec .dayhead .rel { color: var(--sea); }
+.dayhead .cnt { margin-inline-start: auto; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.dayhead .cnt b { color: var(--ink); }
+.day.overdue .lbl { color: var(--danger); }
+.daynote { font-size: 13px; color: var(--muted); margin: -4px 42px 8px 0; }
+.daysel { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); margin: 0 42px 8px 0; }
+.list { display: grid; gap: 10px; }
+.subhead { font-size: 13px; font-weight: 700; letter-spacing: .06em; color: var(--pick-ink); margin: 8px 4px 0; }
+
+/* order card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); scroll-margin-top: 90px; overflow: hidden; }
+.card.pickup { background: var(--pick-bg); border-color: var(--pick-line); }
+.card.packed:not(.open) { opacity: .62; }
+.card.fired { border-inline-start: 4px solid var(--sea); }
+.ch { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: stretch; }
+.ch.nosel { grid-template-columns: minmax(0, 1fr) auto; }
+.selbox { display: grid; place-items: center; padding-inline: 12px 4px; }
+.selbox input { width: 24px; height: 24px; accent-color: var(--sea); }
+.info { background: none; border: 0; text-align: start; padding: 14px 16px; display: grid; gap: 4px; min-width: 0; }
+.l1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.onum { font-weight: 700; color: var(--muted); font-size: 15px; }
+.oname { font-weight: 700; font-size: 18px; }
+.l2 { color: var(--muted); font-size: 15px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.l2 .ph { color: var(--ink); font-weight: 500; direction: ltr; unicode-bidi: isolate; }
+.l3 { font-size: 13px; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.pick { background: var(--pick-line); color: var(--pick-ink); border-color: transparent; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.chip.sea { background: var(--sea-soft); color: var(--sea); border-color: transparent; }
+.chip.warn { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.chip.opt { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.packcell { display: grid; place-items: center; padding: 10px 14px; border-inline-start: 1px solid var(--line); }
+.card.pickup .packcell { border-color: var(--pick-line); }
+.packbox { width: 58px; height: 58px; border-radius: 12px; border: 3px solid var(--muted); background: var(--surface); display: grid; place-items: center; padding: 0; }
+.packbox svg { width: 34px; height: 34px; opacity: 0; }
+.packbox[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); }
+.packbox[aria-pressed="true"] svg { opacity: 1; stroke: var(--surface); }
+.packbox.ready { border-color: var(--ok); box-shadow: 0 0 0 4px var(--ok-soft); }
+.packlbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--muted); margin-top: 4px; text-align: center; }
+
+.body { border-top: 1px solid var(--line); padding: 6px 16px 16px; background: var(--surface); }
+.card.pickup .body { border-color: var(--pick-line); }
+.items { display: grid; }
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.item:last-child { border-bottom: 0; }
+.iname { font-weight: 600; font-size: 17px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.imeta { font-size: 14px; color: var(--muted); }
+.qty { font-size: 20px; font-weight: 700; color: var(--ink); margin: 2px 0; }
+.inote { font-size: 14px; background: var(--accent-soft); color: var(--ink); padding: 4px 8px; border-radius: 8px; margin-top: 4px; display: inline-block; }
+.wcell { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.winput { width: 110px; min-height: 52px; font-size: 22px; font-weight: 600; text-align: center; border: 2px solid var(--line); border-radius: 10px; background: var(--surface); direction: ltr; font-variant-numeric: tabular-nums; }
+.winput:focus { border-color: var(--accent); outline: none; }
+.unit { color: var(--muted); font-size: 14px; }
+.okbtn { min-height: 52px; min-width: 64px; border-radius: 10px; border: 0; background: var(--ink); color: var(--bg); font-weight: 700; padding: 0 14px; }
+.final { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: var(--ok); }
+.final small { font-size: 13px; color: var(--muted); font-weight: 500; }
+.diff { font-size: 13px; font-weight: 600; }
+.diff.pos { color: var(--danger); }
+.diff.neg { color: var(--ok); }
+.rm { background: none; border: 1px solid var(--line); border-radius: 8px; width: 40px; height: 40px; color: var(--danger); font-size: 20px; line-height: 1; }
+.addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 12px; margin-top: 8px; background: var(--surface-2); border-radius: 10px; }
+.addrow .field { flex: 1 1 200px; }
+.addrow .field.amt { flex: 0 1 120px; }
+.obar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px dashed var(--line); margin-top: 6px; }
+.obar .grow { flex: 1; }
+.total { font-size: 15px; color: var(--muted); }
+.total b { color: var(--ink); font-size: 17px; }
+.msg { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-weight: 600; font-size: 15px; }
+.msg.bad { background: var(--danger-soft); color: var(--danger); }
+.msg.good { background: var(--ok-soft); color: var(--ok); }
+.msg.info { background: var(--sea-soft); color: var(--sea); }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px 6px 6px; }
+.toggle .sw { width: 40px; height: 24px; border-radius: 999px; background: var(--line); position: relative; transition: background .2s; }
+.toggle .sw::after { content: ""; position: absolute; top: 3px; inset-inline-start: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); transition: inset-inline-start .2s; }
+.toggle[aria-pressed="true"] .sw { background: var(--pick-ink); }
+.toggle[aria-pressed="true"] .sw::after { inset-inline-start: 19px; }
+
+/* motion */
+.card.flash { animation: flash .9s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 0 var(--ok); transform: scale(.985); } 40% { box-shadow: 0 0 0 6px var(--ok-soft); } 100% { box-shadow: var(--shadow); transform: none; } }
+.body.opening { animation: drop .32s ease-out; }
+@keyframes drop { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.card.shake { animation: shake .4s; }
+@keyframes shake { 20%, 60% { transform: translateX(6px); } 40%, 80% { transform: translateX(-6px); } }
+@media (prefers-reduced-motion: reduce) { .card.flash, .body.opening, .card.shake { animation: none; } .dayhead .chev, .toggle .sw, .toggle .sw::after { transition: none; } }
+
+/* bulk bar */
+.bulk { position: fixed; inset: auto 0 0 0; z-index: 6; background: var(--ink); color: var(--bg); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bulk .wrap { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding-block: 12px; }
+.bulk .grow { flex: 1; font-weight: 600; }
+.bulk .btn { min-height: 44px; }
+.bulk .btn.light { background: var(--bg); color: var(--ink); border-color: var(--bg); }
+
+/* tables (pages) */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; }
+.panel h2 { margin: 0; font-size: 20px; }
+.panel p { margin: 0; color: var(--muted); }
+.tscroll { overflow-x: auto; }
+table.t { border-collapse: collapse; width: 100%; font-size: 15px; font-variant-numeric: tabular-nums; }
+table.t th { text-align: start; font-size: 13px; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.t td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.stop { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.stop .n { width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-weight: 700; }
+.stop.start .n { background: var(--accent); color: var(--accent-ink); }
+.stops { display: grid; gap: 8px; }
+.empty { text-align: center; color: var(--muted); padding: 40px 16px; border: 1px dashed var(--line); border-radius: var(--r); }
+
+/* modal */
+.scrim { position: fixed; inset: 0; background: rgba(8, 20, 24, .55); z-index: 20; display: grid; place-items: center; padding: 16px; }
+.modal { background: var(--surface); border-radius: 16px; width: min(560px, 100%); max-height: calc(100% - 32px); overflow: auto; padding: 22px; display: grid; gap: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.modal.wide { width: min(760px, 100%); }
+.modal h3 { margin: 0; font-size: 21px; text-wrap: balance; }
+.modal p { margin: 0; color: var(--muted); }
+.mact { display: flex; gap: 10px; justify-content: flex-start; flex-wrap: wrap; padding-top: 6px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px 14px; }
+.checks label { display: flex; gap: 8px; align-items: center; font-size: 15px; min-height: 36px; }
+.checks input { width: 20px; height: 20px; accent-color: var(--sea); }
+.irow { display: grid; grid-template-columns: minmax(0, 2fr) minmax(80px, 1fr) minmax(80px, 1fr) 44px; gap: 8px; align-items: end; }
+.irow.np { grid-template-columns: minmax(0, 2fr) minmax(80px, 1fr) 44px; }
+textarea.csv { width: 100%; min-height: 180px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; direction: ltr; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--surface-2); }
+.toast { position: fixed; inset: auto 0 calc(24px + env(safe-area-inset-bottom, 0px)) 0; display: grid; place-items: center; z-index: 30; pointer-events: none; padding-inline: 16px; }
+.toast div { background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 12px; font-weight: 600; box-shadow: var(--shadow); max-width: 560px; text-align: center; }
+.bulk ~ .toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+
+@media (max-width: 560px) {
+  .item { grid-template-columns: 1fr; }
+  .wcell { justify-content: flex-start; }
+  .packbox { width: 50px; height: 50px; }
+  .info { padding: 12px; }
+  .dayhead .lbl { font-size: 18px; }
+  .daynote, .daysel { margin-inline-start: 0; }
+  .irow, .irow.np { grid-template-columns: 1fr 1fr 44px; }
+  .irow .f-prod { grid-column: 1 / -1; }
+}
+</style>
+
+<div id="app" dir="rtl" lang="he"></div>
+
+<script>
+(function () {
+"use strict";
+document.documentElement.setAttribute("dir", "rtl");
+document.documentElement.setAttribute("lang", "he");
+
+/* ---------- dates (Israel time) ---------- */
+const TZ = "Asia/Jerusalem";
+const TODAY = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const toD = s => { const [y, m, d] = s.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+const isoOf = d => d.toISOString().slice(0, 10);
+const addDays = (s, n) => { const d = toD(s); d.setUTCDate(d.getUTCDate() + n); return isoOf(d); };
+const dow = s => toD(s).getUTCDay(); // 0 = Sunday
+const isDelivDay = s => dow(s) >= 1 && dow(s) <= 5;
+const isOpenDay = s => dow(s) !== 6;
+const nextDeliv = (s, incl) => { let d = incl ? s : addDays(s, 1); while (!isDelivDay(d)) d = addDays(d, 1); return d; };
+const prevDeliv = s => { let d = addDays(s, -1); while (!isDelivDay(d)) d = addDays(d, -1); return d; };
+const nextSunday = s => { let d = addDays(s, 1); while (dow(d) !== 0) d = addDays(d, 1); return d; };
+const DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+function dayParts(s) {
+  const d = toD(s);
+  const base = DAYS[dow(s)] + " " + d.getUTCDate() + "/" + (d.getUTCMonth() + 1);
+  let rel = "";
+  if (s === TODAY) rel = "היום";
+  else if (s === addDays(TODAY, 1)) rel = "מחר";
+  return { rel, base };
+}
+const dayText = s => { const p = dayParts(s); return (p.rel ? p.rel + " · " : "") + p.base; };
+function upcomingDays(n, pred) { const out = []; let d = TODAY; while (out.length < n) { if (pred(d)) out.push(d); d = addDays(d, 1); } return out; }
+
+/* ---------- helpers ---------- */
+const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n, dp) => (Math.round(n * 1000) / 1000).toLocaleString("he-IL", { minimumFractionDigits: dp == null ? 0 : dp, maximumFractionDigits: dp == null ? 3 : dp });
+const kg = n => fmt(n, n < 10 ? 2 : 1);
+const nis = n => (n < 0 ? "−" : "") + "₪" + fmt(Math.abs(n), Math.abs(n) % 1 ? 2 : 0);
+const uid = () => Math.random().toString(36).slice(2, 9);
+const fullAddr = a => !a ? "" : [a.street && (a.street + (a.building ? " " + a.building : "")), a.entrance && ("כניסה " + a.entrance), a.floor && a.floor !== "0" && ("קומה " + a.floor), a.apt && ("דירה " + a.apt), a.city].filter(Boolean).join(", ");
+const reduced = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+  sget(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+  sset(k, v) { try { sessionStorage.setItem(k, v); } catch (e) {} },
+  sdel(k) { try { sessionStorage.removeItem(k); } catch (e) {} }
+};
+
+/* ---------- catalog (names & site prices from real order emails) ---------- */
+const CUT = "גוש/ליין או חתוך?";
+const SKIN = "האם להסיר את העור?";
+const PRODUCTS = [
+  { name: "סשימי טונה", unit: "kg", ppu: 420 },
+  { name: "סשימי טורו טונה", unit: "kg", ppu: 600 },
+  { name: "סשימי סלמון נורווגי", unit: "kg", ppu: 220 },
+  { name: "סשימי יילו טייל המאצ׳י", unit: "kg", ppu: 460 },
+  { name: "טרטר טונה טרי", unit: "kg", ppu: 420 },
+  { name: "טרטר סלמון נורווגי", unit: "kg", ppu: 220 },
+  { name: "טרטר יילו טייל המאצ׳י", unit: "kg", ppu: 460 },
+  { name: "קרפצ׳יו פלמידה לבנה", unit: "kg", ppu: 460 },
+  { name: "פילה סלמון נורווגי לפי משקל", unit: "kg", ppu: 155 },
+  { name: "פילה סלמון נורווגי פרוס טרי", unit: "kg", ppu: 155 },
+  { name: "פילה דניס טרי", unit: "kg", ppu: 236 },
+  { name: "פילה לברק טרי", unit: "kg", ppu: 236 },
+  { name: "פילה לוקוס טרי", unit: "kg", ppu: 380 },
+  { name: "גיוזה עוף", unit: "unit", ppu: 30 },
+  { name: "צנצנת רוטב פונזו בסטה דגים", unit: "unit", ppu: 20 }
+];
+const prod = name => PRODUCTS.find(p => p.name === name);
+
+/* ---------- sample data (invented customers and restaurants) ---------- */
+const CLIENTS = [
+  { id: "c1", business: "מסעדת הנמל", contact: "יוסי אלון", legal: "הנמל הצפוני בע״מ", hp: "515234871", phone: "052-7781203", addr: { city: "תל אביב-יפו", street: "נמל תל אביב, האנגר", building: "12" } },
+  { id: "c2", business: "ביסטרו אלנבי", contact: "מאיה רז", legal: "א.ר. ביסטרו בע״מ", hp: "516098432", phone: "054-3320918", addr: { city: "תל אביב-יפו", street: "אלנבי", building: "64" } },
+  { id: "c3", business: "סושי צפון", contact: "אורי קדמי", legal: "צפון אוכל יפני בע״מ", hp: "514877610", phone: "050-9912447", addr: { city: "רמת גן", street: "ז׳בוטינסקי", building: "21" } },
+  { id: "c4", business: "טאפאס יפו", contact: "דנה שגיא", legal: "ד.ש. מטבח ים בע״מ", hp: "517300285", phone: "053-4418820", addr: { city: "תל אביב-יפו", street: "יפת", building: "30" } }
+];
+const client = id => CLIENTS.find(c => c.id === id);
+
+function seed() {
+  const D0 = nextDeliv(TODAY, true), D1 = nextDeliv(D0), D2 = nextDeliv(D1), SUN = nextSunday(TODAY), OVER = prevDeliv(D0);
+  const I = (name, count, price, kgv, option, note) => ({ id: uid(), name, unit: kgv == null ? "unit" : "kg", count, kg: kgv == null ? null : kgv, price, option: option || "", note: note || "", final: null, confirmed: false, added: false });
+  const P = (num, date, name, phone, pickup, addr, items, win) => ({ id: "p" + num, kind: "private", num: String(num), date, window: win || (pickup ? "10:00-17:00" : "09:00-16:00"), pickup, name, phone, addr: pickup ? null : addr, items, removed: [], fee: pickup ? 0 : 30, packed: false, deleted: null, fired: null, source: "email" });
+  const B = (num, date, cid, items, pickup) => ({ id: "b" + num, kind: "business", num: "B-" + num, date, cid, pickup: !!pickup, items: items.map(([name, amt]) => { const p = prod(name); return { id: uid(), name, unit: p.unit, count: p.unit === "unit" ? amt : null, kg: p.unit === "kg" ? amt : null, price: null, option: "", note: "", final: null, confirmed: false, added: false }; }), removed: [], packed: false, deleted: null, fired: null, source: "whatsapp" });
+  const cut = "חתוך";
+  const orders = [
+    P(976, OVER, "עומר דביר", "054-6612980", false, { city: "תל אביב-יפו", street: "פלורנטין", building: "18", floor: "2", apt: "4" }, [I("סשימי סלמון נורווגי", 3, 66, 0.3, cut), I("פילה סלמון נורווגי פרוס טרי", 1, 31, 0.2, "פילה בלי עור")]),
+    P(981, D0, "נועה ברק", "052-6380112", false, { city: "תל אביב-יפו", street: "שלמה המלך", building: "41", floor: "3", apt: "9" }, [I("סשימי טונה", 4, 168, 0.4, cut, "אם אפשר לחתוך ממש דק, תודה"), I("טרטר סלמון נורווגי", 4, 88, 0.4, cut), I("גיוזה עוף", 2, 60, null)]),
+    P(982, D0, "איתי שרון", "050-2219044", false, { city: "רמת גן", street: "ביאליק", building: "12", entrance: "ב", floor: "6", apt: "23" }, [I("פילה דניס טרי", 3, 156, 0.66), I("פילה סלמון נורווגי לפי משקל", 2, 155, 1, "פילה בלי עור", "מהחלק העבה בבקשה")]),
+    P(983, D0, "מיכל אדלר", "053-8804082", true, null, [I("טרטר טונה טרי", 12, 504, 1.2, cut), I("טרטר יילו טייל המאצ׳י", 8, 368, 0.8, cut)]),
+    P(984, D0, "Daniel Cohen", "058-5320081", false, { city: "Tel Aviv-Yafo", street: "Dizengoff Street", building: "180", floor: "5" }, [I("סשימי טורו טונה", 2, 120, 0.2, cut), I("סשימי סלמון נורווגי", 3, 66, 0.3, cut)]),
+    P(985, D0, "רונית גל", "054-8045482", false, { city: "הוד השרון", street: "הנשיאים", building: "7", floor: "0" }, [I("פילה לוקוס טרי", 3, 798, 2.1)]),
+    P(986, D1, "גיל אבני", "052-9917735", false, { city: "גבעתיים", street: "כצנלסון", building: "50", floor: "1", apt: "2" }, [I("קרפצ׳יו פלמידה לבנה", 1, 46, 0.1, cut), I("פילה לברק טרי", 1, 52, 0.22, "פילה בלי עור")]),
+    P(987, D1, "שירה לוי", "054-2345443", true, null, [I("סשימי טונה", 2, 84, 0.2, "גוש/ליין", "גוש מלבני להכנת טאטקי"), I("צנצנת רוטב פונזו בסטה דגים", 1, 20, null)]),
+    P(988, D1, "אבי מזרחי", "050-5248939", false, { city: "תל אביב-יפו", street: "אבן גבירול", building: "102", floor: "4", apt: "12" }, [I("טרטר טונה טרי", 7, 294, 0.7, cut), I("סשימי יילו טייל המאצ׳י", 2, 92, 0.2, cut)]),
+    P(989, D2, "ליאת פרץ", "052-8585951", false, { city: "ירקונה", street: "הדקל", building: "9", floor: "0" }, [I("פילה סלמון נורווגי לפי משקל", 2, 155, 1, "פילה עם עור"), I("פילה לברק טרי", 4, 208, 0.88)]),
+    P(990, D2, "יונתן רוזן", "058-1417760", true, null, [I("סשימי טורו טונה", 3, 180, 0.3, cut)]),
+    P(991, SUN, "הדס נחום", "054-7771230", true, null, [I("פילה דניס טרי", 2, 104, 0.44), I("גיוזה עוף", 1, 30, null)]),
+    P(992, SUN, "בן אשכנזי", "050-3998120", true, null, [I("טרטר סלמון נורווגי", 10, 220, 1, cut)]),
+    B(1000, D0, "c1", [["פילה סלמון נורווגי לפי משקל", 6], ["סשימי טונה", 2]]),
+    B(1001, D0, "c2", [["פילה לברק טרי", 3], ["פילה דניס טרי", 2.5]]),
+    B(1002, D0, "c4", [["פילה לוקוס טרי", 4], ["צנצנת רוטב פונזו בסטה דגים", 6]], true),
+    B(1003, D1, "c3", [["סשימי טונה", 3], ["סשימי סלמון נורווגי", 4], ["סשימי יילו טייל המאצ׳י", 2]]),
+    B(1004, D1, "c1", [["פילה סלמון נורווגי לפי משקל", 5]]),
+    B(1005, D2, "c2", [["פילה לוקוס טרי", 2], ["קרפצ׳יו פלמידה לבנה", 1]])
+  ];
+  // a few already packed, so the preview shows every state
+  const pack = (id, finals) => { const o = orders.find(x => x.id === id); o.items.forEach((it, i) => { it.final = finals[i]; it.confirmed = true; }); o.packed = true; o.packedAt = Date.now() - 3600e3; };
+  pack("p984", [0.21, 0.32]);
+  pack("b1000", [6.15, 2.04]);
+  orders.find(o => o.id === "b1000").fired = { doc: "40012", at: Date.now() - 1800e3, preview: true };
+  const clientPrices = {
+    c1: { "פילה סלמון נורווגי לפי משקל": 128, "סשימי טונה": 360 },
+    c2: { "פילה לברק טרי": 205, "פילה דניס טרי": 205, "פילה לוקוס טרי": 330 },
+    c3: { "סשימי טונה": 365, "סשימי סלמון נורווגי": 185, "סשימי יילו טייל המאצ׳י": 400 },
+    c4: { "פילה לוקוס טרי": 335, "צנצנת רוטב פונזו בסטה דגים": 16 }
+  };
+  return { v: 1, orders, clientPrices, log: [{ t: Date.now() - 3600e3, who: "עובד", what: "סימן כארוזה", ref: "984" }, { t: Date.now() - 1800e3, who: "מנהל", what: "הפיק תעודת משלוח (תצוגה) #40012", ref: "B-1000" }], seq: { m: 500, b: 1006 }, seededFor: TODAY };
+}
+
+const KEY = "bastapack-preview-v1";
+function load() {
+  const raw = store.get(KEY);
+  if (!raw) return null;
+  try { const s = JSON.parse(raw); return s && s.v === 1 && s.seededFor === TODAY ? s : null; } catch (e) { return null; }
+}
+let S = load() || seed();
+const save = () => store.set(KEY, JSON.stringify(S));
+
+/* ---------- UI state ---------- */
+const ui = {
+  role: store.sget("bp-role"), screen: store.sget("bp-role") ? "home" : "login",
+  open: new Set(), dayOpen: {}, editing: new Set(), drafts: {}, errs: {}, notes: {},
+  selectMode: false, selected: new Set(), modal: null, toast: null, flash: null, opening: null,
+  shake: null, scrollTo: null, focusId: null, adding: {}, deliverDay: null, loginErr: ""
+};
+const isAdmin = () => ui.role === "admin";
+const who = () => isAdmin() ? "מנהל" : "עובד";
+function log(what, ref) { S.log.unshift({ t: Date.now(), who: who(), what, ref }); if (S.log.length > 300) S.log.length = 300; }
+let toastTimer = null;
+function toast(msg) { ui.toast = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { ui.toast = null; render(); }, 2800); }
+
+/* ---------- order logic ---------- */
+const byId = id => S.orders.find(o => o.id === id);
+const live = () => S.orders.filter(o => !o.deleted);
+const oName = o => o.kind === "private" ? o.name : client(o.cid).business;
+const ppuOf = (o, it) => {
+  if (o.kind === "business") { const p = (S.clientPrices[o.cid] || {})[it.name]; return p == null ? null : p; }
+  if (it.added) return prod(it.name) ? prod(it.name).ppu : 0;
+  return it.unit === "kg" ? it.price / it.kg : it.price / it.count;
+};
+const ordered = it => it.unit === "kg" ? it.kg : it.count;
+const unitLbl = it => it.unit === "kg" ? "ק״ג" : "יח׳";
+const amtText = (it, v) => it.unit === "kg" ? kg(v) + " ק״ג" : fmt(v) + " יח׳";
+function itemDiff(o, it) {
+  if (o.kind !== "private" || !it.confirmed) return 0;
+  const p = ppuOf(o, it);
+  if (it.added) return it.final * p;
+  return (it.final - ordered(it)) * p;
+}
+function orderDiff(o) {
+  if (o.kind !== "private") return 0;
+  let d = o.items.reduce((s, it) => s + itemDiff(o, it), 0);
+  d -= o.removed.reduce((s, it) => s + (it.added ? 0 : it.price), 0);
+  return Math.round(d * 100) / 100;
+}
+function bizTotal(o) {
+  let t = 0, missing = [];
+  o.items.forEach(it => { const p = ppuOf(o, it); if (p == null) missing.push(it.name); else t += (it.confirmed ? it.final : ordered(it)) * p; });
+  return { total: Math.round(t * 100) / 100, missing };
+}
+function groupKey(o) { return o.date < TODAY && !o.packed ? "overdue" : o.date; }
+function sortedDay(list) {
+  return list.slice().sort((a, b) => (a.pickup - b.pickup) || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || String(a.num).localeCompare(String(b.num), "en", { numeric: true }));
+}
+function sectionGroups(kind) {
+  const os = live().filter(o => o.kind === kind && (o.date >= TODAY || !o.packed));
+  const map = {};
+  os.forEach(o => { const k = groupKey(o); (map[k] = map[k] || []).push(o); });
+  const keys = Object.keys(map).sort((a, b) => a === "overdue" ? -1 : b === "overdue" ? 1 : a < b ? -1 : 1);
+  return keys.map(k => ({ key: k, orders: sortedDay(map[k]) }));
+}
+function dayIsOpen(kind, key, idx) {
+  const k = kind + ":" + key;
+  if (k in ui.dayOpen) return ui.dayOpen[k];
+  if (key === "overdue") return true;
+  const groups = sectionGroups(kind).filter(g => g.key !== "overdue");
+  return groups.length && groups[0].key === key;
+}
+function nextUnpacked(o) {
+  const g = sectionGroups(o.kind).find(g => g.orders.some(x => x.id === o.id));
+  if (!g) return null;
+  const i = g.orders.findIndex(x => x.id === o.id);
+  return g.orders.slice(i + 1).find(x => !x.packed) || g.orders.slice(0, i).find(x => !x.packed) || null;
+}
+
+function parseAmt(it, raw) {
+  const v = Number(String(raw || "").trim().replace(",", "."));
+  if (!isFinite(v) || String(raw || "").trim() === "") return { err: "הזינו " + (it.unit === "kg" ? "משקל" : "כמות") };
+  if (it.unit === "unit" && (!Number.isInteger(v) || v < 0)) return { err: "כמות צריכה להיות מספר שלם" };
+  if (it.unit === "kg" && (v <= 0 || v > 200)) return { err: "משקל בין 0.01 ל-200 ק״ג" };
+  return { v };
+}
+function confirmItem(oid, iid) {
+  const o = byId(oid), it = o.items.find(x => x.id === iid);
+  const key = oid + ":" + iid;
+  const r = parseAmt(it, ui.drafts[key] != null ? ui.drafts[key] : it.final);
+  if (r.err) { ui.errs[key] = r.err; ui.focusId = "w-" + key; render(); return; }
+  const before = it.final;
+  it.final = r.v; it.confirmed = true; delete ui.errs[key]; delete ui.drafts[key]; delete ui.notes[oid];
+  if (before != null && before !== r.v) log("שינה משקל " + it.name + " מ-" + fmt(before) + " ל-" + fmt(r.v), o.num);
+  const nxt = o.items.find(x => !x.confirmed);
+  ui.focusId = nxt ? "w-" + oid + ":" + nxt.id : null;
+  if (!nxt && !o.packed) ui.notes[oid] = { cls: "good", text: "כל המשקלים הוזנו. סמנו את ההזמנה כארוזה." };
+  save(); render();
+}
+function tryPack(oid) {
+  const o = byId(oid);
+  if (o.packed) {
+    if (o.fired) { toast("הזמנה שהופקה במורנינג לא ניתנת לביטול אריזה"); render(); return; }
+    openConfirm({ title: "לבטל את האריזה?", body: "הזמנה " + o.num + " · " + oName(o) + " תחזור לרשימת ההזמנות שלא נארזו.", ok: "כן, לבטל אריזה", danger: true, run: () => { o.packed = false; log("ביטל אריזה", o.num); save(); toast("ההזמנה הוחזרה ללא ארוזה"); } });
+    return;
+  }
+  const missing = o.items.filter(it => !it.confirmed);
+  if (!o.items.length) { ui.notes[oid] = { cls: "bad", text: "אין פריטים בהזמנה." }; ui.open.add(oid); render(); return; }
+  if (missing.length) {
+    ui.open.add(oid); ui.shake = oid;
+    ui.notes[oid] = { cls: "bad", text: "חסר " + (missing.length > 1 ? "אישור משקל ל: " : "אישור משקל ל: ") + missing.map(m => m.name).join(", ") };
+    ui.focusId = "w-" + oid + ":" + missing[0].id; render(); return;
+  }
+  o.packed = true; o.packedAt = Date.now();
+  ui.open.delete(oid); ui.editing.delete(oid); delete ui.notes[oid];
+  ui.flash = oid;
+  const n = nextUnpacked(o);
+  if (n) { ui.open.add(n.id); ui.opening = n.id; ui.scrollTo = n.id; }
+  log("סימן כארוזה", o.num);
+  save(); render();
+}
+
+/* ---------- rendering ---------- */
+const $app = document.getElementById("app");
+const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg>';
+const CHEV = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+
+function render() {
+  const active = document.activeElement;
+  const keepFocus = active && active.id && !ui.focusId ? active.id : null;
+  let h = '<div class="strip"><div class="wrap"><span>תצוגה מקדימה · שלב 1 · נתוני דוגמה עם לקוחות בדויים · שינויים נשמרים רק במכשיר הזה</span><button data-act="reset">איפוס נתוני דוגמה</button></div></div>';
+  if (ui.screen === "login") h += renderLogin();
+  else {
+    h += renderHeader();
+    h += '<main><div class="wrap">' + renderScreen() + '</div></main>';
+    if (ui.selectMode && isAdmin() && (ui.screen === "private" || ui.screen === "business")) h += renderBulk();
+  }
+  if (ui.modal) h += renderModal();
+  if (ui.toast) h += '<div class="toast" role="status"><div>' + esc(ui.toast) + '</div></div>';
+  $app.innerHTML = h;
+  // post-render effects
+  const fid = ui.focusId || keepFocus;
+  if (fid) {
+    const el = document.getElementById(fid);
+    if (el) {
+      el.focus({ preventScroll: !ui.focusId });
+      try { if (ui.focusId && el.select) el.select(); else if (el.setSelectionRange && el.value != null) el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
+    }
+  }
+  ui.focusId = null;
+  if (ui.scrollTo) { const el = document.getElementById("card-" + ui.scrollTo); if (el) setTimeout(() => el.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" }), 120); ui.scrollTo = null; }
+  ui.flash = null; ui.opening = null; ui.shake = null;
+}
+
+function renderLogin() {
+  return '<main><div class="wrap"><form class="login" id="loginForm" autocomplete="off">' +
+    '<h1>בסטה</h1><p>הזמנות, אריזה ומשלוחים</p>' +
+    '<div class="field"><label for="lu">שם משתמש</label><input id="lu" name="u" dir="ltr" required></div>' +
+    '<div class="field"><label for="lp">סיסמה</label><input id="lp" name="p" type="password" dir="ltr" required></div>' +
+    (ui.loginErr ? '<div class="err">' + esc(ui.loginErr) + '</div>' : "") +
+    '<button class="btn primary" type="submit">כניסה</button>' +
+    '<div class="hint"><b>פרטי כניסה לתצוגה</b><span>עובדים: basta / 1234 · מנהל: admin / 9999</span><div class="row"><button type="button" class="btn small" data-act="demo:employee">כניסה כעובד</button><button type="button" class="btn small" data-act="demo:admin">כניסה כמנהל</button></div></div>' +
+    '</form></div></main>';
+}
+
+const TITLES = { home: "", private: "פרטי", business: "עסקי", deliver: "משלוחים", diffs: "הפרשי מחיר", trash: "סל מחזור", log: "יומן פעולות" };
+function renderHeader() {
+  return '<header class="top"><div class="wrap">' +
+    '<button class="brand" data-act="go:home" aria-label="מסך הבית">בסטה</button>' +
+    '<div class="crumb">' + esc(TITLES[ui.screen] || "") + '</div>' +
+    (ui.screen !== "home" ? '<button class="ghost" data-act="go:home">חזרה</button>' : "") +
+    '<span class="role ' + (isAdmin() ? "admin" : "") + '">' + (isAdmin() ? "מנהל" : "עובד") + '</span>' +
+    '<button class="ghost" data-act="logout">יציאה</button>' +
+    '</div></header>';
+}
+
+function renderScreen() {
+  switch (ui.screen) {
+    case "home": return renderHome();
+    case "private": case "business": return renderSection(ui.screen);
+    case "deliver": return renderDeliver();
+    case "diffs": return isAdmin() ? renderDiffs() : "";
+    case "trash": return isAdmin() ? renderTrash() : "";
+    case "log": return isAdmin() ? renderLog() : "";
+  }
+  return "";
+}
+
+function homeCount(kind) {
+  const g = sectionGroups(kind).filter(x => x.key !== "overdue")[0];
+  if (!g) return "אין הזמנות פתוחות";
+  const p = g.orders.filter(o => o.packed).length;
+  return dayText(g.key) + ": " + g.orders.length + " הזמנות · " + p + " ארוזות";
+}
+function renderHome() {
+  let h = '<div class="home"><div class="bigs">' +
+    '<button class="big private" data-act="go:private"><span class="en">PRIVATE</span><span class="t">פרטי</span><span class="s num">' + esc(homeCount("private")) + '</span></button>' +
+    '<button class="big business" data-act="go:business"><span class="en">BUSINESS</span><span class="t">עסקי</span><span class="s num">' + esc(homeCount("business")) + '</span></button>' +
+    '</div><div class="tiles">' +
+    '<button class="tile" data-act="go:deliver"><b>משלוחים</b><span>עצירות לפי יום משלוח</span></button>';
+  if (isAdmin()) {
+    const diffs = live().filter(o => o.kind === "private" && o.packed && orderDiff(o) !== 0).length;
+    h += '<button class="tile" data-act="go:diffs"><b>הפרשי מחיר</b><span class="num">' + diffs + ' הזמנות עם הפרש</span></button>' +
+      '<button class="tile" data-act="go:trash"><b>סל מחזור</b><span class="num">' + S.orders.filter(o => o.deleted).length + ' הזמנות שנמחקו</span></button>' +
+      '<button class="tile" data-act="go:log"><b>יומן פעולות</b><span>מי עשה מה ומתי</span></button>';
+  }
+  return h + '</div></div>';
+}
+
+function renderSection(kind) {
+  const groups = sectionGroups(kind);
+  let h = '<div class="' + kind + '-sec"><div class="toolbar">';
+  if (isAdmin()) {
+    h += '<button class="btn primary small" data-act="new:' + kind + '">+ הזמנה חדשה</button>' +
+      '<button class="btn small" data-act="selmode" aria-pressed="' + ui.selectMode + '">' + (ui.selectMode ? "סיום בחירה" : "בחירה מרובה") + '</button>';
+    if (ui.selectMode) h += '<button class="btn small" data-act="selall:' + kind + '">בחירת כל ה' + (kind === "private" ? "פרטיות" : "עסקיות") + '</button>';
+  }
+  h += '<span class="grow"></span><div class="seg" role="group" aria-label="מעבר בין חלקים"><button data-act="go:private" aria-pressed="' + (kind === "private") + '">פרטי</button><button data-act="go:business" aria-pressed="' + (kind === "business") + '">עסקי</button></div></div>';
+  if (!groups.length) h += '<div class="empty">אין הזמנות פתוחות</div>';
+  groups.forEach((g, gi) => {
+    const open = dayIsOpen(kind, g.key, gi);
+    const packed = g.orders.filter(o => o.packed).length;
+    const parts = g.key === "overdue" ? { rel: "באיחור", base: "מימים קודמים" } : dayParts(g.key);
+    h += '<section class="day ' + (open ? "" : "closed ") + (g.key === "overdue" ? "overdue" : "") + '">' +
+      '<button class="dayhead" data-act="day:' + kind + ':' + g.key + '" aria-expanded="' + open + '"><span class="chev">' + CHEV + '</span>' +
+      '<span class="lbl">' + (parts.rel ? '<span class="rel">' + parts.rel + '</span>' : "") + '<span class="num">' + esc(parts.base) + '</span></span>' +
+      '<span class="cnt num"><b>' + packed + '</b> / ' + g.orders.length + ' ארוזות</span></button>';
+    if (open) {
+      if (g.key !== "overdue" && dow(g.key) === 0) h += '<div class="daynote">יום ראשון: איסוף עצמי בלבד</div>';
+      if (ui.selectMode && isAdmin()) h += '<label class="daysel"><input type="checkbox" data-act="selday:' + kind + ':' + g.key + '" ' + (g.orders.every(o => ui.selected.has(o.id)) ? "checked" : "") + '> בחירת כל היום</label>';
+      h += '<div class="list">';
+      let pickHead = false;
+      g.orders.forEach(o => {
+        if (o.pickup && !pickHead) { h += '<div class="subhead">איסוף עצמי</div>'; pickHead = true; }
+        h += renderCard(o);
+      });
+      h += '</div>';
+    }
+    h += '</section>';
+  });
+  return h + '</div>';
+}
+
+function renderCard(o) {
+  const open = ui.open.has(o.id);
+  const sel = ui.selectMode && isAdmin();
+  const cls = ["card", o.pickup ? "pickup" : "", o.packed ? "packed" : "", open ? "open" : "", o.fired ? "fired" : "", ui.flash === o.id ? "flash" : "", ui.shake === o.id ? "shake" : ""].join(" ");
+  const allConfirmed = o.items.length && o.items.every(i => i.confirmed);
+  let info;
+  if (o.kind === "private") {
+    info = '<span class="l1"><span class="onum num">#' + esc(o.num) + '</span><span class="oname">' + esc(o.name) + '</span>' +
+      (o.pickup ? '<span class="chip pick">איסוף עצמי</span>' : "") + '<span class="chip num">' + esc(o.window) + '</span>' +
+      (o.source === "manual" ? '<span class="chip">ידני</span>' : "") + '</span>' +
+      '<span class="l2"><span class="ph num">' + esc(o.phone) + '</span>' + (o.addr ? '<span>' + esc(fullAddr(o.addr)) + '</span>' : "") + '</span>';
+  } else {
+    const c = client(o.cid);
+    info = '<span class="l1"><span class="onum num">' + esc(o.num) + '</span><span class="oname">' + esc(c.business) + '</span>' +
+      (o.pickup ? '<span class="chip pick">איסוף עצמי</span>' : "") +
+      (o.fired ? '<span class="chip sea num">הופקה · מורנינג #' + esc(o.fired.doc) + '</span>' : "") + '</span>' +
+      '<span class="l2"><span>' + esc(c.contact) + '</span><span class="ph num">' + esc(c.phone) + '</span>' + (o.pickup ? "" : '<span>' + esc(fullAddr(c.addr)) + '</span>') + '</span>' +
+      '<span class="l3 num">' + esc(c.legal) + ' · ח.פ. ' + esc(c.hp) + '</span>';
+  }
+  if (o.packed && o.kind === "private" && isAdmin()) { const d = orderDiff(o); if (d) info = info.replace('</span><span class="l2">', '<span class="chip ' + (d > 0 ? "warn" : "ok") + ' num">הפרש ' + (d > 0 ? "לחיוב " : "לזיכוי ") + nis(Math.abs(d)) + '</span></span><span class="l2">'); }
+  let h = '<article class="' + cls + '" id="card-' + o.id + '"><div class="ch ' + (sel ? "" : "nosel") + '">';
+  if (sel) h += '<label class="selbox"><input type="checkbox" aria-label="בחירת הזמנה ' + esc(o.num) + '" data-act="sel:' + o.id + '" ' + (ui.selected.has(o.id) ? "checked" : "") + '></label>';
+  h += '<button class="info" data-act="toggle:' + o.id + '" aria-expanded="' + open + '">' + info + '</button>' +
+    '<div class="packcell"><div><button class="packbox ' + (!o.packed && allConfirmed ? "ready" : "") + '" data-act="pack:' + o.id + '" aria-pressed="' + o.packed + '" aria-label="' + (o.packed ? "ארוזה. לחיצה לביטול אריזה" : "סימון כארוזה") + '">' + CHECK + '</button><div class="packlbl">' + (o.packed ? "ארוזה" : "ארוזה?") + '</div></div></div></div>';
+  if (open) h += renderBody(o);
+  return h + '</article>';
+}
+
+function renderBody(o) {
+  const editing = ui.editing.has(o.id);
+  const locked = !!o.fired;
+  let h = '<div class="body ' + (ui.opening === o.id ? "opening" : "") + '"><div class="items">';
+  o.items.forEach(it => {
+    const key = o.id + ":" + it.id;
+    const p = ppuOf(o, it);
+    const siteQty = o.kind === "private" && it.count && !it.added ? '<div class="qty num">כמות באתר: ' + fmt(it.count) + '</div>' : "";
+    let meta = it.unit === "kg"
+      ? (siteQty ? "משקל משוער: " + kg(it.kg) + " ק״ג" : "הוזמן " + kg(it.kg) + " ק״ג")
+      : (siteQty ? "" : "הוזמנו " + fmt(it.count) + " יח׳");
+    if (it.added) meta = "נוסף בעת האריזה";
+    if (isAdmin() && p != null) meta += (meta ? " · " : "") + nis(p) + (it.unit === "kg" ? "/ק״ג" : "/יח׳");
+    h += '<div class="item"><div><div class="iname">' + esc(it.name) + (it.option ? '<span class="chip opt">' + esc(it.option) + '</span>' : "") +
+      (isAdmin() && o.kind === "business" && p == null ? '<span class="chip warn">אין מחיר שמור</span>' : "") + '</div>' +
+      siteQty + (meta ? '<div class="imeta num">' + esc(meta) + '</div>' : "") + (it.note ? '<div class="inote">הערת לקוח: ' + esc(it.note) + '</div>' : "") +
+      (ui.errs[key] ? '<div class="err">' + esc(ui.errs[key]) + '</div>' : "") + '</div><div class="wcell">';
+    if (it.confirmed && !editing) {
+      h += '<span class="final num">' + CHECK.replace('<svg', '<svg width="20" height="20" stroke="currentColor"') + amtText(it, it.final) + '</span>';
+      if (isAdmin() && o.kind === "private") { const d = itemDiff(o, it); if (Math.abs(d) >= 0.01) h += '<span class="diff num ' + (d > 0 ? "pos" : "neg") + '">' + (d > 0 ? "+" : "") + nis(d) + '</span>'; }
+    } else if (!locked) {
+      const val = ui.drafts[key] != null ? ui.drafts[key] : (it.final != null ? it.final : "");
+      h += '<input class="winput" id="w-' + key + '" data-key="' + key + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" aria-label="' + (it.unit === "kg" ? "משקל סופי" : "כמות סופית") + ' ' + esc(it.name) + '" value="' + esc(val) + '"><span class="unit">' + unitLbl(it) + '</span>' +
+        '<button class="okbtn" data-act="ok:' + key + '">אישור</button>';
+      if (editing) h += '<button class="rm" data-act="rm:' + key + '" aria-label="הסרת ' + esc(it.name) + '">×</button>';
+    }
+    h += '</div></div>';
+  });
+  if (!o.items.length) h += '<div class="empty">אין פריטים</div>';
+  h += '</div>';
+  if (editing && !locked) {
+    const a = ui.adding[o.id] || {};
+    h += '<div class="addrow"><div class="field"><label for="ap-' + o.id + '">הוספת מוצר</label><select id="ap-' + o.id + '" data-addp="' + o.id + '"><option value="">בחירת מוצר…</option>' +
+      PRODUCTS.map(p => '<option ' + (a.p === p.name ? "selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select></div>' +
+      '<div class="field amt"><label for="aa-' + o.id + '">' + (a.p && prod(a.p).unit === "unit" ? "כמות (יח׳)" : "כמות (ק״ג)") + '</label><input id="aa-' + o.id + '" data-adda="' + o.id + '" inputmode="decimal" dir="ltr" value="' + esc(a.a || "") + '"></div>' +
+      '<button class="btn small sea" data-act="add:' + o.id + '">הוספה</button></div>';
+  }
+  if (ui.notes[o.id]) h += '<div class="msg ' + ui.notes[o.id].cls + '">' + esc(ui.notes[o.id].text) + '</div>';
+  h += '<div class="obar">';
+  if (o.kind === "business" && !locked) h += '<button class="toggle" data-act="pickup:' + o.id + '" aria-pressed="' + o.pickup + '"><span class="sw"></span>איסוף עצמי</button>';
+  if (!locked) h += '<button class="btn small" data-act="edit:' + o.id + '">' + (editing ? "סיום עריכה" : "עריכה") + '</button>';
+  h += '<span class="grow"></span>';
+  if (isAdmin()) {
+    if (o.kind === "private") { if (o.packed) { const d = orderDiff(o); h += '<span class="total num">הפרש: <b>' + (d ? (d > 0 ? "לחיוב " : "לזיכוי ") + nis(Math.abs(d)) : "אין") + '</b></span>'; } }
+    else { const bt = bizTotal(o); h += '<span class="total num">סה״כ ' + (o.packed ? "" : "משוער ") + ': <b>' + nis(bt.total) + '</b>' + (bt.missing.length ? " (חסרים מחירים)" : "") + '</span>'; }
+    if (!locked) h += '<button class="btn small" data-act="details:' + o.id + '">פרטי הזמנה</button><button class="btn small" data-act="del:' + o.id + '" style="color:var(--danger)">מחיקה</button>';
+    if (o.kind === "business" && !o.fired) h += '<button class="btn small sea" data-act="fire:' + o.id + '" ' + (o.packed ? "" : 'title="יש לארוז קודם"') + '>FIRE</button>';
+  }
+  h += '</div>';
+  if (locked) h += '<div class="msg info">ההזמנה הופקה כתעודת משלוח במורנינג ולכן נעולה. תיקונים נעשים במורנינג.</div>';
+  return h + '</div>';
+}
+
+function renderBulk() {
+  const sel = [...ui.selected].map(byId).filter(Boolean);
+  const p = sel.filter(o => o.kind === "private").length, b = sel.length - p;
+  return '<div class="bulk"><div class="wrap"><span class="grow num">נבחרו ' + sel.length + (sel.length ? ' (' + p + ' פרטיות · ' + b + ' עסקיות)' : "") + '</span>' +
+    '<button class="btn small light" data-act="selclear" ' + (sel.length ? "" : "disabled") + '>ניקוי</button>' +
+    '<button class="btn small light" data-act="bulkcsv" ' + (sel.length ? "" : "disabled") + '>ייצוא CSV</button>' +
+    '<button class="btn small danger" data-act="bulkdel" ' + (sel.length ? "" : "disabled") + '>מחיקה</button></div></div>';
+}
+
+function renderDeliver() {
+  const days = [...new Set(live().filter(o => !o.pickup && o.date >= TODAY && isDelivDay(o.date)).map(o => o.date))].sort();
+  const day = ui.deliverDay && days.includes(ui.deliverDay) ? ui.deliverDay : days[0];
+  let h = '<div class="toolbar"><div class="seg" role="group" aria-label="יום משלוח">' + days.map(d => '<button class="num" data-act="dday:' + d + '" aria-pressed="' + (d === day) + '">' + esc(dayText(d)) + '</button>').join("") + '</div><span class="grow"></span>' +
+    '<button class="btn small" disabled title="יתווסף בשלב 4">ייצוא PDF</button></div>';
+  if (!day) return h + '<div class="empty">אין משלוחים מתוכננים</div>';
+  const stops = sortedDay(live().filter(o => o.date === day && !o.pickup));
+  const unpacked = stops.filter(o => !o.packed).length;
+  h += '<div class="panel" style="margin-bottom:14px"><h2 class="num">' + esc(dayText(day)) + ' · ' + stops.length + ' עצירות</h2>' +
+    '<p>בשלב 4 המסלול יחושב אוטומטית ב-Google Maps מנקודת היציאה, עם גרירה לשינוי הסדר וייצוא PDF לנהג. בתצוגה הזו העצירות מסודרות לפי מספר הזמנה.</p>' +
+    (unpacked ? '<div class="msg bad num">' + unpacked + ' הזמנות עדיין לא ארוזות</div>' : '<div class="msg good">כל ההזמנות ארוזות</div>') + '</div>';
+  h += '<div class="stops"><div class="stop start"><span class="n">⌂</span><div><b>יציאה</b><div class="imeta">מקווה ישראל 22, תל אביב</div></div><span></span></div>';
+  stops.forEach((o, i) => {
+    const c = o.kind === "business" ? client(o.cid) : null;
+    h += '<div class="stop"><span class="n num">' + (i + 1) + '</span><div style="min-width:0"><b>' + esc(oName(o)) + '</b> <span class="onum num">' + (o.kind === "private" ? "#" : "") + esc(o.num) + '</span>' +
+      '<div class="imeta">' + esc(fullAddr(c ? c.addr : o.addr)) + '</div><div class="imeta num">' + esc(c ? c.phone : o.phone) + ' · ' + o.items.length + ' פריטים' + (o.window ? " · " + esc(o.window) : "") + '</div></div>' +
+      (o.packed ? '<span class="chip ok">ארוזה</span>' : '<span class="chip warn">לא ארוזה</span>') + '</div>';
+  });
+  h += '<div class="stop start"><span class="n">⌂</span><div><b>חזרה לחנות</b><div class="imeta">ברירת מחדל, ניתן לשנות בהגדרות המנהל</div></div><span></span></div></div>';
+  return h;
+}
+
+function renderDiffs() {
+  const os = live().filter(o => o.kind === "private" && o.packed && orderDiff(o) !== 0).sort((a, b) => a.date < b.date ? -1 : 1);
+  const sum = os.reduce((s, o) => s + orderDiff(o), 0);
+  let h = '<div class="panel"><h2>הפרשי מחיר בהזמנות פרטיות</h2><p>חיובי = הלקוח צריך להשלים תשלום. שלילי = זיכוי ללקוח. דמי משלוח לא נכללים.</p>' +
+    '<div class="toolbar" style="margin:0"><span class="total num">סה״כ נטו: <b>' + nis(sum) + '</b></span><span class="grow"></span><button class="btn small sea" data-act="diffcsv" ' + (os.length ? "" : "disabled") + '>ייצוא CSV</button></div>';
+  if (!os.length) return h + '<div class="empty">אין עדיין הפרשים. הם יופיעו כאן אחרי אריזת הזמנות שמשקלן הסופי שונה מההזמנה.</div></div>';
+  h += '<div class="tscroll"><table class="t"><thead><tr><th>הזמנה</th><th>יום</th><th>לקוח</th><th>טלפון</th><th>פירוט</th><th>הפרש</th></tr></thead><tbody>';
+  os.forEach(o => {
+    const lines = o.items.filter(it => Math.abs(itemDiff(o, it)) >= 0.01).map(it => it.name + ": " + (it.added ? "נוסף " : amtText(it, ordered(it)) + " → ") + amtText(it, it.final)).concat(o.removed.filter(r => !r.added).map(r => r.name + ": הוסר"));
+    const d = orderDiff(o);
+    h += '<tr><td class="num">#' + esc(o.num) + '</td><td class="num">' + esc(dayParts(o.date).base) + '</td><td>' + esc(o.name) + '</td><td class="num" dir="ltr">' + esc(o.phone) + '</td><td style="font-size:13px;color:var(--muted)">' + lines.map(esc).join("<br>") + '</td><td class="num" style="font-weight:700;color:' + (d > 0 ? "var(--danger)" : "var(--ok)") + '">' + (d > 0 ? "+" : "") + nis(d) + '</td></tr>';
+  });
+  return h + '</tbody></table></div></div>';
+}
+
+function renderTrash() {
+  const os = S.orders.filter(o => o.deleted).sort((a, b) => b.deleted - a.deleted);
+  let h = '<div class="panel"><h2>סל מחזור</h2><p>הזמנות שנמחקו נשמרות 30 יום ואפשר לשחזר אותן.</p>';
+  if (!os.length) return h + '<div class="empty">סל המחזור ריק</div></div>';
+  h += '<div class="tscroll"><table class="t"><thead><tr><th>הזמנה</th><th>לקוח</th><th>יום</th><th>נמחקה</th><th></th></tr></thead><tbody>';
+  os.forEach(o => {
+    const left = 30 - Math.floor((Date.now() - o.deleted) / 864e5);
+    h += '<tr><td class="num">' + esc(o.kind === "private" ? "#" + o.num : o.num) + '</td><td>' + esc(oName(o)) + '</td><td class="num">' + esc(dayParts(o.date).base) + '</td><td class="num">נותרו ' + left + ' ימים</td><td><button class="btn small" data-act="restore:' + o.id + '">שחזור</button></td></tr>';
+  });
+  return h + '</tbody></table></div></div>';
+}
+
+function renderLog() {
+  let h = '<div class="panel"><h2>יומן פעולות</h2><p>בשלב זה יש כניסה משותפת לעובדים, לכן היומן מציין "עובד" או "מנהל".</p>';
+  if (!S.log.length) return h + '<div class="empty">אין עדיין פעולות</div></div>';
+  h += '<div class="tscroll"><table class="t"><thead><tr><th>זמן</th><th>מי</th><th>פעולה</th><th>הזמנה</th></tr></thead><tbody>';
+  S.log.slice(0, 150).forEach(e => {
+    const t = new Intl.DateTimeFormat("he-IL", { timeZone: TZ, day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(e.t));
+    h += '<tr><td class="num">' + esc(t) + '</td><td>' + esc(e.who) + '</td><td>' + esc(e.what) + '</td><td class="num">' + esc(e.ref || "") + '</td></tr>';
+  });
+  return h + '</tbody></table></div></div>';
+}
+
+/* ---------- modals ---------- */
+let modalRun = null;
+function openConfirm({ title, body, ok, danger, run }) { ui.modal = { type: "confirm", title, body, ok, danger }; modalRun = run; render(); setTimeout(() => { const b = document.getElementById("m-ok"); if (b) b.focus(); }, 0); }
+function closeModal() { ui.modal = null; modalRun = null; render(); }
+
+const COLS = [
+  ["num", "מספר הזמנה", 1], ["kind", "סוג", 1], ["date", "יום", 1], ["mode", "משלוח / איסוף", 1], ["window", "חלון זמן", 0],
+  ["name", "לקוח / איש קשר", 1], ["business", "עסק", 1], ["company", "חברה וח.פ.", 0], ["phone", "טלפון", 1], ["address", "כתובת", 1],
+  ["item", "פריט", 1], ["option", "אפשרות", 0], ["note", "הערת לקוח", 0], ["ordered", "כמות שהוזמנה", 1], ["unit", "יחידה", 1],
+  ["final", "משקל / כמות סופית", 1], ["ppu", "מחיר ליחידה", 0], ["diff", "הפרש מחיר (₪)", 1], ["status", "סטטוס", 1], ["doc", "מסמך במורנינג", 1]
+];
+const DIFF_COLS = [
+  ["num", "מספר הזמנה", 1], ["date", "יום", 1], ["name", "לקוח", 1], ["phone", "טלפון", 1], ["item", "פריט", 1], ["ordered", "כמות שהוזמנה", 1],
+  ["unit", "יחידה", 1], ["final", "משקל / כמות סופית", 1], ["ppu", "מחיר ליחידה", 1], ["diff", "הפרש פריט (₪)", 1], ["odiff", "הפרש הזמנה (₪)", 1]
+];
+
+function renderModal() {
+  const m = ui.modal;
+  let h = '<div class="scrim" data-act="scrim"><div class="modal ' + (m.wide ? "wide" : "") + '" role="dialog" aria-modal="true" aria-labelledby="m-title">';
+  if (m.type === "confirm") {
+    h += '<h3 id="m-title">' + esc(m.title) + '</h3><p>' + esc(m.body) + '</p><div class="mact"><button id="m-ok" class="btn ' + (m.danger ? "danger" : "primary") + '" data-act="m-ok">' + esc(m.ok) + '</button><button class="btn" data-act="m-close">ביטול</button></div>';
+  } else if (m.type === "csv") {
+    const cols = m.mode === "diffs" ? DIFF_COLS : COLS;
+    h += '<h3 id="m-title">ייצוא CSV</h3>';
+    if (m.mode === "orders") h += '<p>מה לייצא?</p><div class="checks"><label><input type="checkbox" id="x-private" ' + (m.counts.private ? "checked" : "disabled") + '> פרטיות (' + m.counts.private + ')</label><label><input type="checkbox" id="x-business" ' + (m.counts.business ? "checked" : "disabled") + '> עסקיות (' + m.counts.business + ')</label></div><p>כשמייצאים את שתיהן, הן באותו קובץ: פרטיות, שתי שורות ריקות, ואז עסקיות.</p>';
+    h += '<p>עמודות:</p><div class="checks">' + cols.map(c => '<label><input type="checkbox" id="col-' + c[0] + '" ' + (c[2] ? "checked" : "") + '> ' + esc(c[1]) + '</label>').join("") + '</div>' +
+      (m.err ? '<div class="err">' + esc(m.err) + '</div>' : "") +
+      '<div class="mact"><button class="btn primary" data-act="m-csv">ייצוא</button><button class="btn" data-act="m-close">ביטול</button></div>';
+  } else if (m.type === "csvtext") {
+    h += '<h3 id="m-title">הקובץ מוכן</h3><p>בתצוגה הזו לא ניתן להוריד קובץ ישירות. העתיקו את התוכן והדביקו בגיליון.</p><textarea class="csv" id="csvtext" readonly>' + esc(m.text) + '</textarea><div class="mact"><button class="btn primary" data-act="m-copy">העתקה</button><button class="btn" data-act="m-close">סגירה</button></div>';
+  } else if (m.type === "fire") {
+    const o = byId(m.id), c = client(o.cid), bt = bizTotal(o);
+    h += '<h3 id="m-title">הפקת תעודת משלוח במורנינג</h3><p>' + esc(o.num) + ' · ' + esc(c.business) + ' · ' + esc(c.legal) + ' (ח.פ. ' + esc(c.hp) + ')</p>' +
+      '<div class="tscroll"><table class="t"><thead><tr><th>פריט</th><th>כמות</th><th>מחיר</th><th>סה״כ</th></tr></thead><tbody>' +
+      o.items.map(it => { const p = ppuOf(o, it); return '<tr><td>' + esc(it.name) + '</td><td class="num">' + amtText(it, it.final) + '</td><td class="num">' + (p == null ? '<span class="chip warn">חסר</span>' : nis(p)) + '</td><td class="num">' + (p == null ? "" : nis(it.final * p)) + '</td></tr>'; }).join("") +
+      '</tbody></table></div><div class="total num">סה״כ לפני מע״מ: <b>' + nis(bt.total) + '</b></div>' +
+      (bt.missing.length ? '<div class="msg bad">חסר מחיר שמור ללקוח עבור: ' + esc(bt.missing.join(", ")) + '. הוסיפו מחיר ב"פרטי הזמנה" או דרך העוזר בוואטסאפ.</div>' : '<div class="msg info">בתצוגה זו לא נשלח דבר למורנינג. ההזמנה רק תסומן כהופקה עם מספר לדוגמה.</div>') +
+      '<div class="mact"><button class="btn sea" data-act="m-fire" ' + (bt.missing.length ? "disabled" : "") + '>הפקה (תצוגה)</button><button class="btn" data-act="m-close">ביטול</button></div>';
+  } else if (m.type === "form") {
+    h += renderOrderForm(m);
+  }
+  return h + '</div></div>';
+}
+
+function dateOptions(sel, kind, pickup) {
+  const days = upcomingDays(12, d => isOpenDay(d));
+  if (sel && !days.includes(sel)) days.unshift(sel);
+  return days.map(d => '<option value="' + d + '" ' + (d === sel ? "selected" : "") + '>' + esc(dayText(d)) + (dow(d) === 0 ? " (איסוף בלבד)" : "") + '</option>').join("");
+}
+function renderOrderForm(m) {
+  const v = m.values;
+  const isNew = !m.id;
+  let h = '<h3 id="m-title">' + (isNew ? "הזמנה " + (m.kind === "private" ? "פרטית" : "עסקית") + " חדשה" : "פרטי הזמנה " + esc(byId(m.id).num)) + '</h3><div class="grid2">';
+  if (m.kind === "private") {
+    h += fld("f-name", "שם לקוח", v.name) + fld("f-phone", "טלפון", v.phone, "ltr") +
+      '<div class="field"><label for="f-type">סוג</label><select id="f-type"><option value="delivery" ' + (!v.pickup ? "selected" : "") + '>משלוח</option><option value="pickup" ' + (v.pickup ? "selected" : "") + '>איסוף עצמי</option></select></div>' +
+      '<div class="field"><label for="f-date">יום</label><select id="f-date">' + dateOptions(v.date) + '</select></div>' +
+      fld("f-window", "חלון זמן", v.window, "ltr") + fld("f-city", "עיר", v.city) + fld("f-street", "רחוב", v.street) + fld("f-building", "מספר בניין", v.building) +
+      fld("f-entrance", "כניסה", v.entrance) + fld("f-floor", "קומה", v.floor) + fld("f-apt", "דירה", v.apt);
+  } else {
+    h += '<div class="field"><label for="f-client">לקוח (ממורנינג)</label><select id="f-client">' + CLIENTS.map(c => '<option value="' + c.id + '" ' + (c.id === v.cid ? "selected" : "") + '>' + esc(c.business) + '</option>').join("") + '</select></div>' +
+      '<div class="field"><label for="f-date">יום</label><select id="f-date">' + dateOptions(v.date) + '</select></div>' +
+      '<div class="field"><label for="f-pick">איסוף עצמי</label><select id="f-pick"><option value="0" ' + (!v.pickup ? "selected" : "") + '>לא, משלוח</option><option value="1" ' + (v.pickup ? "selected" : "") + '>כן</option></select></div>';
+  }
+  h += '</div>';
+  if (m.kind === "business") {
+    // price list for this client (also shown when editing)
+    h += '<p>' + (isNew ? "פריטים. המחיר ללקוח נשמר ונשאר עד שמשנים אותו." : "מחירים שמורים ללקוח עבור הפריטים בהזמנה:") + '</p>';
+  } else if (isNew) h += '<p>פריטים</p>';
+  if (isNew) {
+    m.rows.forEach((r, i) => {
+      const p = prod(r.p);
+      const saved = m.kind === "business" && r.p ? (S.clientPrices[v.cid] || {})[r.p] : null;
+      h += '<div class="irow ' + (m.kind === "business" ? "" : "np") + '"><div class="field f-prod"><label for="r-p-' + i + '">מוצר</label><select id="r-p-' + i + '" data-row="' + i + '"><option value="">בחירה…</option>' + PRODUCTS.map(x => '<option ' + (x.name === r.p ? "selected" : "") + '>' + esc(x.name) + '</option>').join("") + '</select></div>' +
+        '<div class="field"><label for="r-a-' + i + '">' + (p && p.unit === "unit" ? "יח׳" : "ק״ג") + '</label><input id="r-a-' + i + '" inputmode="decimal" dir="ltr" value="' + esc(r.a || "") + '"></div>' +
+        (m.kind === "business" ? '<div class="field"><label for="r-c-' + i + '">₪ ל' + (p && p.unit === "unit" ? "יח׳" : "ק״ג") + '</label><input id="r-c-' + i + '" inputmode="decimal" dir="ltr" placeholder="' + (saved == null ? "אין שמור" : "") + '" value="' + esc(r.c != null && r.c !== "" ? r.c : (saved == null ? "" : saved)) + '"></div>' : "") +
+        '<button class="rm" data-act="m-rmrow:' + i + '" aria-label="הסרת שורה">×</button></div>';
+    });
+    h += '<div><button class="linkbtn" data-act="m-addrow">+ שורה</button></div>';
+  } else if (m.kind === "business") {
+    const o = byId(m.id);
+    h += '<div class="grid2">' + o.items.map((it, i) => { const sp = (S.clientPrices[v.cid] || {})[it.name]; return '<div class="field"><label for="pp-' + i + '">' + esc(it.name) + ' (₪ ל' + unitLbl(it) + ')</label><input id="pp-' + i + '" data-pname="' + esc(it.name) + '" inputmode="decimal" dir="ltr" value="' + esc(sp == null ? "" : sp) + '" placeholder="אין שמור"></div>'; }).join("") + '</div>';
+  }
+  if (m.err) h += '<div class="err">' + esc(m.err) + '</div>';
+  h += '<div class="mact"><button class="btn primary" data-act="m-save">' + (isNew ? "יצירת הזמנה" : "שמירה") + '</button><button class="btn" data-act="m-close">ביטול</button></div>';
+  return h;
+}
+function fld(id, label, val, dir) { return '<div class="field"><label for="' + id + '">' + esc(label) + '</label><input id="' + id + '" ' + (dir ? 'dir="' + dir + '"' : "") + ' value="' + esc(val || "") + '"></div>'; }
+const gv = id => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
+function syncForm() {
+  const m = ui.modal; if (!m || m.type !== "form") return;
+  const v = m.values;
+  if (m.kind === "private") Object.assign(v, { name: gv("f-name"), phone: gv("f-phone"), pickup: gv("f-type") === "pickup", date: gv("f-date"), window: gv("f-window"), city: gv("f-city"), street: gv("f-street"), building: gv("f-building"), entrance: gv("f-entrance"), floor: gv("f-floor"), apt: gv("f-apt") });
+  else Object.assign(v, { cid: gv("f-client"), date: gv("f-date"), pickup: gv("f-pick") === "1" });
+  if (!m.id) m.rows.forEach((r, i) => { r.p = gv("r-p-" + i); r.a = gv("r-a-" + i); if (m.kind === "business") r.c = gv("r-c-" + i); });
+}
+function openForm(kind, id) {
+  let values;
+  if (id) {
+    const o = byId(id);
+    values = kind === "private" ? Object.assign({ name: o.name, phone: o.phone, pickup: o.pickup, date: o.date, window: o.window }, o.addr || {}) : { cid: o.cid, date: o.date, pickup: o.pickup };
+  } else values = kind === "private" ? { pickup: false, date: nextDeliv(TODAY, true), window: "09:00-16:00", city: "תל אביב-יפו" } : { cid: CLIENTS[0].id, date: nextDeliv(TODAY, true), pickup: false };
+  ui.modal = { type: "form", kind, id, values, rows: [{}], wide: true };
+  render();
+}
+function saveForm() {
+  syncForm();
+  const m = ui.modal, v = m.values;
+  const err = t => { m.err = t; render(); };
+  if (m.kind === "private") {
+    if (!v.name) return err("חסר שם לקוח");
+    if (!/^[0-9+\-\s]{9,}$/.test(v.phone)) return err("מספר טלפון לא תקין");
+    if (!v.pickup && (!v.city || !v.street || !v.building)) return err("למשלוח צריך עיר, רחוב ומספר בניין");
+    if (!v.pickup && !isDelivDay(v.date)) return err("ביום ראשון יש איסוף עצמי בלבד");
+  } else if (!v.pickup && !isDelivDay(v.date)) return err("ביום ראשון יש איסוף עצמי בלבד. סמנו איסוף עצמי או בחרו יום אחר");
+  if (m.id) {
+    const o = byId(m.id);
+    if (m.kind === "private") {
+      Object.assign(o, { name: v.name, phone: v.phone, pickup: v.pickup, date: v.date, window: v.window, addr: v.pickup ? null : { city: v.city, street: v.street, building: v.building, entrance: v.entrance, floor: v.floor, apt: v.apt } });
+    } else {
+      Object.assign(o, { cid: v.cid, date: v.date, pickup: v.pickup });
+      const prices = S.clientPrices[v.cid] = S.clientPrices[v.cid] || {};
+      document.querySelectorAll("[data-pname]").forEach(el => { const n = Number(el.value.replace(",", ".")); if (el.value.trim() && isFinite(n) && n > 0 && prices[el.dataset.pname] !== n) { log("עדכן מחיר " + el.dataset.pname + " ל-" + nis(n) + " ל" + client(v.cid).business, o.num); prices[el.dataset.pname] = n; } });
+    }
+    log("ערך פרטי הזמנה", o.num); save(); ui.modal = null; toast("נשמר"); return;
+  }
+  const rows = m.rows.filter(r => r.p);
+  if (!rows.length) return err("הוסיפו לפחות מוצר אחד");
+  for (const r of rows) { const p = prod(r.p); const n = Number(String(r.a).replace(",", ".")); if (!isFinite(n) || n <= 0 || (p.unit === "unit" && !Number.isInteger(n))) return err("כמות לא תקינה עבור " + r.p); }
+  let o;
+  if (m.kind === "private") {
+    const num = "M-" + (++S.seq.m);
+    o = { id: "m" + S.seq.m, kind: "private", num, date: v.date, window: v.window || (v.pickup ? "10:00-17:00" : "09:00-16:00"), pickup: v.pickup, name: v.name, phone: v.phone, addr: v.pickup ? null : { city: v.city, street: v.street, building: v.building, entrance: v.entrance, floor: v.floor, apt: v.apt }, removed: [], fee: v.pickup ? 0 : 30, packed: false, deleted: null, fired: null, source: "manual",
+      items: rows.map(r => { const p = prod(r.p), n = Number(String(r.a).replace(",", ".")); return { id: uid(), name: p.name, unit: p.unit, count: p.unit === "unit" ? n : null, kg: p.unit === "kg" ? n : null, price: Math.round(n * p.ppu * 100) / 100, option: "", note: "", final: null, confirmed: false, added: false }; }) };
+  } else {
+    const num = S.seq.b++;
+    const prices = S.clientPrices[v.cid] = S.clientPrices[v.cid] || {};
+    rows.forEach(r => { const c = Number(String(r.c || "").replace(",", ".")); if (r.c && isFinite(c) && c > 0 && prices[r.p] !== c) { prices[r.p] = c; log("עדכן מחיר " + r.p + " ל-" + nis(c) + " ל" + client(v.cid).business, "B-" + num); } });
+    o = { id: "b" + num, kind: "business", num: "B-" + num, date: v.date, cid: v.cid, pickup: v.pickup, removed: [], packed: false, deleted: null, fired: null, source: "manual",
+      items: rows.map(r => { const p = prod(r.p), n = Number(String(r.a).replace(",", ".")); return { id: uid(), name: p.name, unit: p.unit, count: p.unit === "unit" ? n : null, kg: p.unit === "kg" ? n : null, price: null, option: "", note: "", final: null, confirmed: false, added: false }; }) };
+  }
+  S.orders.push(o); log("יצר הזמנה ידנית", o.num);
+  ui.dayOpen[o.kind + ":" + o.date] = true; ui.open.add(o.id); ui.scrollTo = o.id;
+  save(); ui.modal = null; toast("הזמנה " + o.num + " נוצרה");
+}
+
+/* ---------- CSV ---------- */
+const csvCell = v => { const s = String(v == null ? "" : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const statusOf = o => o.fired ? "הופקה" : o.packed ? "ארוזה" : "חדשה";
+function rowsFor(o, keys, diffMode) {
+  const c = o.kind === "business" ? client(o.cid) : null;
+  const base = {
+    num: o.num, kind: o.kind === "private" ? "פרטי" : "עסקי", date: o.date, mode: o.pickup ? "איסוף עצמי" : "משלוח", window: o.window || "",
+    name: c ? c.contact : o.name, business: c ? c.business : "", company: c ? c.legal + " " + c.hp : "", phone: c ? c.phone : o.phone,
+    address: fullAddr(c ? c.addr : o.addr), status: statusOf(o), doc: o.fired ? o.fired.doc + (o.fired.preview ? " (תצוגה)" : "") : "", odiff: orderDiff(o).toFixed(2)
+  };
+  const out = [];
+  const itemRow = (it, removed) => {
+    const p = ppuOf(o, it);
+    const r = Object.assign({}, base, { item: it.name + (removed ? " (הוסר)" : it.added ? " (נוסף)" : ""), option: it.option, note: it.note, ordered: it.added ? "" : ordered(it), unit: unitLbl(it), final: removed ? 0 : (it.confirmed ? it.final : ""), ppu: p == null ? "" : Math.round(p * 100) / 100, diff: o.kind !== "private" ? "" : removed ? (it.added ? 0 : -it.price).toFixed(2) : it.confirmed ? itemDiff(o, it).toFixed(2) : "" });
+    out.push(keys.map(k => csvCell(r[k])).join(","));
+  };
+  o.items.forEach(it => { if (!diffMode || Math.abs(itemDiff(o, it)) >= 0.01) itemRow(it, false); });
+  o.removed.forEach(it => itemRow(it, true));
+  return out;
+}
+function buildCSV(sections, keys, cols, diffMode) {
+  const lines = [];
+  sections.forEach((sec, i) => {
+    if (i > 0) lines.push("", "");
+    lines.push(keys.map(k => csvCell(cols.find(c => c[0] === k)[1])).join(","));
+    sec.forEach(o => lines.push(...rowsFor(o, keys, diffMode)));
+  });
+  return "﻿" + lines.join("\r\n");
+}
+async function deliverCSV(text, filename) {
+  let dl = null;
+  try { dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null; } catch (e) { dl = null; }
+  if (dl) {
+    try { await dl.save({ filename, data: text }); ui.modal = null; toast("הקובץ נשמר"); return; }
+    catch (e) { if (e && e.code === "declined") { ui.modal = null; toast("השמירה בוטלה"); return; } }
+  }
+  ui.modal = { type: "csvtext", text: text.replace(/^﻿/, ""), wide: true }; render();
+}
+async function runCSV() {
+  const m = ui.modal;
+  const cols = m.mode === "diffs" ? DIFF_COLS : COLS;
+  const keys = cols.map(c => c[0]).filter(k => { const el = document.getElementById("col-" + k); return el && el.checked; });
+  if (!keys.length) { m.err = "בחרו לפחות עמודה אחת"; render(); return; }
+  let sections, name;
+  if (m.mode === "diffs") {
+    sections = [live().filter(o => o.kind === "private" && o.packed && orderDiff(o) !== 0)];
+    name = "basta-price-differences-" + TODAY + ".csv";
+  } else {
+    const wantP = document.getElementById("x-private") && document.getElementById("x-private").checked;
+    const wantB = document.getElementById("x-business") && document.getElementById("x-business").checked;
+    if (!wantP && !wantB) { m.err = "בחרו פרטיות, עסקיות או את שתיהן"; render(); return; }
+    const sel = [...ui.selected].map(byId).filter(Boolean);
+    sections = [];
+    if (wantP) sections.push(sortedDay(sel.filter(o => o.kind === "private")));
+    if (wantB) sections.push(sortedDay(sel.filter(o => o.kind === "business")));
+    name = "basta-orders-" + TODAY + ".csv";
+  }
+  const text = buildCSV(sections, keys, cols, m.mode === "diffs");
+  log("ייצא CSV", "");
+  save();
+  await deliverCSV(text, name);
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  const act = t.dataset.act;
+  if (act === "scrim") { if (e.target === t) closeModal(); return; }
+  const [a, b, c] = act.split(":");
+  const rest = act.slice(a.length + 1);
+  switch (a) {
+    case "demo": login(b === "admin" ? "admin" : "basta", b === "admin" ? "9999" : "1234"); break;
+    case "logout": store.sdel("bp-role"); ui.role = null; ui.screen = "login"; ui.selectMode = false; ui.selected.clear(); render(); break;
+    case "reset": openConfirm({ title: "לאפס את נתוני הדוגמה?", body: "כל השינויים שעשיתם בתצוגה יימחקו וההזמנות יחזרו למצב ההתחלתי.", ok: "איפוס", danger: true, run: () => { store.del(KEY); S = seed(); save(); ui.open.clear(); ui.editing.clear(); ui.selected.clear(); ui.dayOpen = {}; ui.notes = {}; ui.drafts = {}; toast("נתוני הדוגמה אופסו"); } }); break;
+    case "go": ui.screen = b; if (b === "home") { ui.selectMode = false; } window.scrollTo(0, 0); render(); break;
+    case "day": { const k = b + ":" + rest.slice(b.length + 1); const cur = dayIsOpen(b, rest.slice(b.length + 1)); ui.dayOpen[k] = !cur; render(); break; }
+    case "toggle": if (ui.open.has(b)) ui.open.delete(b); else { ui.open.add(b); ui.opening = b; } render(); break;
+    case "ok": confirmItem(b, c); break;
+    case "pack": tryPack(b); break;
+    case "edit": if (ui.editing.has(b)) { ui.editing.delete(b); } else { ui.editing.add(b); ui.open.add(b); } render(); break;
+    case "rm": { const o = byId(b), it = o.items.find(x => x.id === c); openConfirm({ title: "להסיר את " + it.name + "?", body: "הפריט יוסר מהזמנה " + o.num + ".", ok: "הסרה", danger: true, run: () => { o.items = o.items.filter(x => x.id !== c); o.removed.push(it); if (o.packed && !o.items.length) o.packed = false; log("הסיר פריט " + it.name, o.num); save(); } }); break; }
+    case "add": addItem(b); break;
+    case "pickup": { const o = byId(b); o.pickup = !o.pickup; log(o.pickup ? "סימן כאיסוף עצמי" : "ביטל איסוף עצמי", o.num); save(); toast(o.pickup ? "סומן כאיסוף עצמי. ההזמנה הוצאה ממסלול המשלוח" : "ההזמנה חזרה למשלוח"); render(); break; }
+    case "details": { const o = byId(b); openForm(o.kind, b); break; }
+    case "del": { const o = byId(b); openConfirm({ title: "למחוק את הזמנה " + o.num + "?", body: oName(o) + ". ההזמנה תעבור לסל המחזור ותישמר שם 30 יום.", ok: "מחיקה", danger: true, run: () => { o.deleted = Date.now(); ui.open.delete(o.id); ui.selected.delete(o.id); log("מחק הזמנה", o.num); save(); toast("ההזמנה הועברה לסל המחזור"); } }); break; }
+    case "fire": { const o = byId(b); if (!o.packed) { ui.notes[b] = { cls: "bad", text: "יש לארוז את ההזמנה לפני הפקה במורנינג." }; render(); break; } ui.modal = { type: "fire", id: b }; render(); break; }
+    case "new": openForm(b); break;
+    case "selmode": ui.selectMode = !ui.selectMode; if (!ui.selectMode) ui.selected.clear(); render(); break;
+    case "sel": if (t.checked) ui.selected.add(b); else ui.selected.delete(b); render(); break;
+    case "selday": { const key = rest.slice(b.length + 1); const g = sectionGroups(b).find(x => x.key === key); if (g) g.orders.forEach(o => t.checked ? ui.selected.add(o.id) : ui.selected.delete(o.id)); render(); break; }
+    case "selall": sectionGroups(b).forEach(g => g.orders.forEach(o => ui.selected.add(o.id))); render(); break;
+    case "selclear": ui.selected.clear(); render(); break;
+    case "bulkdel": bulkDelete(); break;
+    case "bulkcsv": { const sel = [...ui.selected].map(byId).filter(Boolean); ui.modal = { type: "csv", mode: "orders", wide: true, counts: { private: sel.filter(o => o.kind === "private").length, business: sel.filter(o => o.kind === "business").length } }; render(); break; }
+    case "diffcsv": ui.modal = { type: "csv", mode: "diffs", wide: true }; render(); break;
+    case "restore": { const o = byId(b); o.deleted = null; log("שחזר הזמנה", o.num); save(); toast("ההזמנה שוחזרה"); render(); break; }
+    case "dday": ui.deliverDay = b; render(); break;
+    case "m-close": closeModal(); break;
+    case "m-ok": { const run = modalRun; ui.modal = null; modalRun = null; if (run) run(); render(); break; }
+    case "m-csv": runCSV(); break;
+    case "m-copy": { const ta = document.getElementById("csvtext"); const txt = ta.value; const done = () => toast("הועתק"); try { navigator.clipboard.writeText(txt).then(done, () => { ta.select(); toast("סמנו והעתיקו ידנית"); }); } catch (err) { ta.select(); } break; }
+    case "m-fire": { const o = byId(ui.modal.id); o.fired = { doc: String(40000 + Math.floor(Math.random() * 900) + 13), at: Date.now(), preview: true }; ui.editing.delete(o.id); log("הפיק תעודת משלוח (תצוגה) #" + o.fired.doc, o.num); save(); ui.modal = null; toast("סומנה כהופקה (תצוגה) · #" + o.fired.doc); render(); break; }
+    case "m-save": saveForm(); render(); break;
+    case "m-addrow": syncForm(); ui.modal.rows.push({}); render(); break;
+    case "m-rmrow": syncForm(); ui.modal.rows.splice(Number(b), 1); if (!ui.modal.rows.length) ui.modal.rows.push({}); render(); break;
+  }
+});
+function addItem(oid) {
+  const o = byId(oid), a = ui.adding[oid] || {};
+  const p = prod(a.p);
+  const n = Number(String(a.a || "").replace(",", "."));
+  if (!p) { ui.notes[oid] = { cls: "bad", text: "בחרו מוצר להוספה" }; render(); return; }
+  if (!isFinite(n) || n <= 0 || (p.unit === "unit" && !Number.isInteger(n))) { ui.notes[oid] = { cls: "bad", text: "הזינו כמות תקינה" }; render(); return; }
+  const it = { id: uid(), name: p.name, unit: p.unit, count: p.unit === "unit" ? n : null, kg: p.unit === "kg" ? n : null, price: o.kind === "private" ? 0 : null, option: "", note: "", final: null, confirmed: false, added: o.kind === "private" };
+  o.items.push(it);
+  delete ui.adding[oid];
+  if (o.packed) { o.packed = false; ui.notes[oid] = { cls: "info", text: "נוסף פריט, ולכן ההזמנה חזרה ללא ארוזה. אשרו את המשקל וסמנו שוב." }; }
+  else delete ui.notes[oid];
+  log("הוסיף פריט " + p.name, o.num);
+  ui.focusId = "w-" + oid + ":" + it.id;
+  save(); render();
+}
+function bulkDelete() {
+  const sel = [...ui.selected].map(byId).filter(Boolean);
+  const fired = sel.filter(o => o.fired);
+  const del = sel.filter(o => !o.fired);
+  openConfirm({ title: "למחוק " + del.length + " הזמנות?", body: "ההזמנות יעברו לסל המחזור ויישמרו 30 יום." + (fired.length ? " " + fired.length + " הזמנות שהופקו במורנינג לא יימחקו." : ""), ok: "מחיקה", danger: true,
+    run: () => { del.forEach(o => { o.deleted = Date.now(); ui.open.delete(o.id); ui.selected.delete(o.id); log("מחק הזמנה (בחירה מרובה)", o.num); }); save(); toast(del.length + " הזמנות הועברו לסל המחזור"); } });
+}
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; delete ui.errs[el.dataset.key]; }
+  if (el.dataset.adda) { (ui.adding[el.dataset.adda] = ui.adding[el.dataset.adda] || {}).a = el.value; }
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.dataset.addp) { (ui.adding[el.dataset.addp] = ui.adding[el.dataset.addp] || {}).p = el.value; render(); }
+  if (el.dataset.row != null && ui.modal && ui.modal.type === "form") { syncForm(); render(); }
+  if (el.id === "f-client" && ui.modal && !ui.modal.id) { syncForm(); render(); }
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && ui.modal) { closeModal(); return; }
+  const el = e.target;
+  if (e.key === "Enter" && el.dataset && el.dataset.key) { e.preventDefault(); const [o, i] = el.dataset.key.split(":"); confirmItem(o, i); }
+  if (e.key === "Enter" && el.dataset && el.dataset.adda) { e.preventDefault(); addItem(el.dataset.adda); }
+});
+document.addEventListener("submit", e => {
+  if (e.target.id !== "loginForm") return;
+  e.preventDefault();
+  login(gv("lu"), document.getElementById("lp").value);
+});
+function login(u, p) {
+  u = (u || "").trim().toLowerCase();
+  let role = null;
+  if (u === "basta" && p === "1234") role = "employee";
+  if (u === "admin" && p === "9999") role = "admin";
+  if (!role) { ui.loginErr = "שם משתמש או סיסמה שגויים"; render(); return; }
+  ui.loginErr = ""; ui.role = role; store.sset("bp-role", role); ui.screen = "home"; render();
+}
+
+render();
+})();
+</script>
