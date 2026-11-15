@@ -1,0 +1,41 @@
+# Runs on every change. A change must pass these before it goes live.
+name: checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: JavaScript syntax
+        run: for f in web/*.js web/lib/*.js; do node --check "$f"; done
+      - name: Logic tests (days, money, CSV)
+        run: node --test tests/*.test.mjs
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Browser walk-through (demo data)
+        run: |
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+          (cd web && python -m http.server 8765 &) && sleep 2
+          python tests/ui.spec.py http://localhost:8765/
+
+  deploy:
+    # Publishes web/ with GitHub Pages once Pages is switched on
+    # (repository variable PAGES_ENABLED = true).
+    needs: checks
+    if: github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions: { pages: write, id-token: write }
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: web }
+      - id: deployment
+        uses: actions/deploy-pages@v4

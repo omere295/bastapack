@@ -1,0 +1,11 @@
+{
+  "name": "BastaPack · בסטה דגים",
+  "short_name": "BastaPack",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#EAF0F1",
+  "theme_color": "#CF4F33",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

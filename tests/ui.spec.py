@@ -1,0 +1,106 @@
+"""End-to-end walk-through of the app in demo mode. Run: python3 tests/ui.spec.py http://localhost:8765/"""
+import sys, re
+from playwright.sync_api import sync_playwright
+
+BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8765/"
+errors = []
+def check(cond, msg):
+    print(("PASS " if cond else "FAIL ") + msg)
+    if not cond: errors.append(msg)
+
+with sync_playwright() as p:
+    b = p.chromium.launch()
+    pg = b.new_page(viewport={"width": 820, "height": 1180}, accept_downloads=True)
+    pg.on("pageerror", lambda e: errors.append("JS error: " + str(e)))
+    pg.goto(BASE + "?demo")
+    pg.fill("#lu", "admin"); pg.fill("#lp", "wrong"); pg.click("button[type=submit]")
+    check("שגויים" in pg.inner_text(".err"), "wrong password is refused")
+    pg.fill("#lp", "9999"); pg.click("button[type=submit]")
+    pg.wait_for_selector(".big.private")
+    pg.click(".big.private")
+    days = pg.locator(".dayhead .lbl").all_inner_texts()
+    check(days[0].startswith("באיחור"), "overdue section first: " + days[0].replace("\n", " "))
+    card = pg.locator("section.day:not(.overdue) .card").first
+    cid = card.get_attribute("id")
+    card.locator(".packbox").click()
+    pg.wait_for_timeout(200)
+    check("חסר אישור משקל" in pg.inner_text("#" + cid + " .msg"), "packing blocked until weights are in")
+    check(pg.locator("#" + cid + " .qty").count() > 0, "website quantity shown large")
+    for i in range(pg.locator("#" + cid + " .winput").count()):
+        inp = pg.locator("#" + cid + " .winput").first
+        inp.fill("0.45" if i < 2 else "2"); inp.press("Enter"); pg.wait_for_timeout(150)
+    check("כל המשקלים הוזנו" in pg.inner_text("#" + cid + " .msg"), "all weights confirmed message")
+    pg.locator("#" + cid + " .packbox").click(); pg.wait_for_timeout(400)
+    check(pg.locator("#" + cid + " .packbox").get_attribute("aria-pressed") == "true", "order packed")
+    opened = [c.get_attribute("id") for c in pg.locator(".card.open").all()]
+    check(len(opened) == 1 and opened[0] != cid, "next order opened automatically: " + str(opened))
+    check("הפרש" in pg.inner_text("#" + cid), "price difference chip on packed order")
+    pg.locator("#" + cid + " .packbox").click()
+    check("לבטל את האריזה" in pg.inner_text(".modal h3"), "unpack asks for confirmation")
+    pg.click("#m-ok"); pg.wait_for_timeout(300)
+    check(pg.locator("#" + cid + " .packbox").get_attribute("aria-pressed") == "false", "order unpacked")
+    # edit: add product
+    pg.locator("#" + cid + " .info").click()
+    pg.locator("#" + cid + " button:has-text('עריכה')").click()
+    pg.locator("#" + cid + " select[data-addp]").select_option(label="גיוזה עוף")
+    pg.locator("#" + cid + " input[data-adda]").fill("1")
+    pg.locator("#" + cid + " button:has-text('הוספה')").click(); pg.wait_for_timeout(300)
+    check(pg.locator("#" + cid + " .iname").count() == 4, "product added while packing")
+    # manual private order
+    pg.click("text=+ הזמנה חדשה")
+    pg.fill("#f-name", "בדיקה ידנית"); pg.fill("#f-phone", "050-1234567"); pg.fill("#f-street", "הרצל"); pg.fill("#f-building", "5")
+    pg.select_option("#r-p-0", label="סשימי טונה"); pg.fill("#r-a-0", "0.3")
+    pg.click(".modal button:has-text('יצירת הזמנה')"); pg.wait_for_timeout(400)
+    check(pg.locator("text=בדיקה ידנית").count() > 0, "manual private order created")
+    # bulk + CSV (both sections)
+    pg.click("text=בחירה מרובה"); pg.click("text=בחירת כל הפרטיות")
+    pg.click(".seg button:has-text('עסקי')"); pg.click("text=בחירת כל העסקיות")
+    check("פרטיות" in pg.inner_text(".bulk .grow"), "bulk selection across sections: " + pg.inner_text(".bulk .grow"))
+    pg.click(".bulk button:has-text('ייצוא CSV')")
+    with pg.expect_download() as dl:
+        pg.click(".modal button:has-text('ייצוא')")
+    text = open(dl.value.path(), encoding="utf-8-sig").read().replace("\r", "")
+    lines = text.split("\n")
+    blanks = [i for i, l in enumerate(lines) if l == ""]
+    check(len(blanks) >= 2 and blanks[1] == blanks[0] + 1 and lines[blanks[1] + 1].startswith("מספר הזמנה"), "CSV: Private, two empty lines, Business header")
+    pg.click("text=סיום בחירה")
+    # business: pickup toggle + fire modal
+    bcard = pg.locator(".card").first; bid = bcard.get_attribute("id")
+    bcard.locator(".info").click()
+    pg.locator("#" + bid + " .toggle").click(); pg.wait_for_timeout(300)
+    check(pg.locator("#" + bid + " .chip.pick").count() == 1, "business order marked self-pickup")
+    pg.locator("#" + bid + " button:has-text('FIRE')").click()
+    check("מורנינג" in pg.inner_text(".modal"), "FIRE explains morning is not connected yet")
+    pg.click(".modal button:has-text('סגירה')")
+    # delete + trash + restore
+    pg.locator("#" + bid + " button:has-text('מחיקה')").click(); pg.click("#m-ok"); pg.wait_for_timeout(300)
+    check(pg.locator("#" + bid).count() == 0, "deleted order disappears")
+    pg.click(".brand"); pg.click("text=סל מחזור")
+    pg.click("text=שחזור"); pg.wait_for_timeout(300)
+    check("ריק" in pg.inner_text("main"), "order restored from trash")
+    pg.click(".brand"); pg.click("text=יומן פעולות"); pg.wait_for_timeout(300)
+    check(pg.locator("table.t tbody tr").count() >= 6, "activity log shows actions")
+    pg.click(".brand"); pg.click("text=הגדרות")
+    check(pg.locator("text=לקוחות עסקיים").count() > 0, "settings page opens")
+    pg.screenshot(path="/tmp/ui-settings.png", full_page=True)
+    pg.click(".brand"); pg.click(".tile:has-text('משלוחים')")
+    check(pg.locator(".stop").count() >= 3, "deliver page lists stops")
+    # employee view
+    pg.click("text=יציאה"); pg.fill("#lu", "basta"); pg.fill("#lp", "1234"); pg.click("button[type=submit]")
+    pg.wait_for_selector(".big.private"); pg.click(".big.private")
+    check(pg.locator("text=+ הזמנה חדשה").count() == 0 and pg.locator("text=פרטי הזמנה").count() == 0, "employee has no admin controls")
+    pg.locator(".card").nth(1).locator(".info").click()
+    check("₪" not in pg.inner_text("main"), "employee sees no prices")
+    # phone, dark
+    ph = b.new_page(viewport={"width": 390, "height": 844}, color_scheme="dark")
+    ph.on("pageerror", lambda e: errors.append("JS error (phone): " + str(e)))
+    ph.goto(BASE + "?demo"); ph.fill("#lu", "admin"); ph.fill("#lp", "9999"); ph.click("button[type=submit]")
+    ph.wait_for_selector(".big.private"); ph.click(".big.private"); ph.locator(".card").nth(1).locator(".info").click()
+    check(ph.evaluate("document.documentElement.scrollWidth") <= 390, "no sideways scroll on phone")
+    ph.screenshot(path="/tmp/ui-phone.png")
+    pg.screenshot(path="/tmp/ui-tablet.png", full_page=True)
+    b.close()
+
+print("\n%d problem(s)" % len(errors))
+for e in errors: print(" -", e)
+sys.exit(1 if errors else 0)
