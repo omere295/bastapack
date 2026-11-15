@@ -42,5 +42,5 @@ The owner (Omer) has **no coding background**. Explain things in plain language,
 ## Supabase project
 
 - Project `bastapack`, ref `hpfxgqsgshglaiwrtogb`, organization "BastaDagim", region eu-central-1 (Frankfurt).
-- Migrations applied: 0001–0004 (15/11/2026). Products seeded from real ClickEat orders.
+- Migrations applied: 0001–0005 (15/11/2026). The owner's WhatsApp number is stored only in the database (this repo is public). Products seeded from real ClickEat orders.
 - Logins: `staff@bastadagim.co.il` (employee, username `basta`) and `admin@bastadagim.co.il` (admin, username `admin`); roles are set by the trigger in 0004.

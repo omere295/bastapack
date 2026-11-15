@@ -93,6 +93,3 @@ begin
 end $$;
 revoke all on function public.mark_email_handled(uuid) from public, anon;
 grant execute on function public.mark_email_handled(uuid) to authenticated;
-
-alter table public.activity_log drop constraint if exists activity_log_actor_check;
-alter table public.activity_log add constraint activity_log_actor_check check (actor in ('employee', 'admin', 'whatsapp', 'system'));
