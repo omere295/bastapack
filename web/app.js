@@ -198,7 +198,7 @@ function render() {
 
 function renderLogin() {
   return '<main><div class="wrap"><form class="login" id="loginForm" autocomplete="on">' +
-    "<h1>בסטה</h1><p>הזמנות, אריזה ומשלוחים</p>" +
+    '<img class="login-logo" src="logo-white.png" alt="בסטה דגים"><p>הזמנות, אריזה ומשלוחים</p>' +
     '<div class="field"><label for="lu">שם משתמש</label><input id="lu" name="username" dir="ltr" autocomplete="username" autocapitalize="none" value="' + esc(ui.loginUser || "") + '" required></div>' +
     '<div class="field"><label for="lp">סיסמה</label><input id="lp" name="password" type="password" dir="ltr" autocomplete="current-password" required></div>' +
     (ui.loginErr ? '<div class="err">' + esc(ui.loginErr) + "</div>" : "") +
