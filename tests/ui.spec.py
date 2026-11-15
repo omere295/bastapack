@@ -83,6 +83,9 @@ with sync_playwright() as p:
     check(pg.locator("table.t tbody tr").count() >= 6, "activity log shows actions")
     pg.click(".brand"); pg.click("text=הגדרות")
     check(pg.locator("text=לקוחות עסקיים").count() > 0, "settings page opens")
+    pg.fill("#cl-search", "סושי"); pg.wait_for_timeout(200)
+    check(pg.locator("tr:has-text('סושי צפון')").count() == 1 and pg.locator("tr:has-text('ביסטרו')").count() == 0, "client search filters the list")
+    check(pg.input_value("#cl-search") == "סושי", "search box keeps what was typed")
     pg.click("text=כתובת אחרת"); pg.wait_for_timeout(200)
     pg.fill("#end-addr", "הרצל 10, ראשון לציון"); pg.click("text=שמירה"); pg.wait_for_timeout(300)
     check(pg.input_value("#end-addr") == "הרצל 10, ראשון לציון", "custom route end address saved")
@@ -109,6 +112,10 @@ with sync_playwright() as p:
     pg.emulate_media(media="print"); pg.screenshot(path="/tmp/ui-print.png", full_page=True); pg.emulate_media(media="screen")
     # FIRE a packed business order (demo morning)
     pg.click(".brand"); pg.click(".big.business")
+    pg.click("text=+ הזמנה חדשה"); pg.fill("#f-client-q", "ביסטרו"); pg.wait_for_timeout(150)
+    pg.click(".clientpick"); pg.select_option("#r-p-0", label="פילה לברק טרי"); pg.fill("#r-a-0", "2")
+    pg.click(".modal button:has-text('יצירת הזמנה')"); pg.wait_for_timeout(400)
+    check(pg.locator(".modal").count() == 0 and pg.locator(".card:has-text('ביסטרו אלנבי')").count() >= 2, "business order created with client search")
     fc = "#card-o-B1001"
     if pg.locator(fc + ".open").count() == 0: pg.locator(fc + " .info").click()
     for i in range(pg.locator(fc + " .winput").count()):

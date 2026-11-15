@@ -46,6 +46,13 @@ const amtText = (it, v) => (it.unit === "kg" ? kg(v) + " ק״ג" : fmt(Number(v)
 const orderDiff = (o) => (o.kind === "private" ? privateOrderDiff(o.order_items, D.productsById) : 0);
 const itemDiff = (o, it) => (o.kind === "private" ? privateItemDiff(it, D.productsById[it.product_id]) : 0);
 const unitPrice = (o, it) => (o.kind === "private" ? privateUnitPrice(it, D.productsById[it.product_id]) : (D.priceMap[o.client_id] || {})[it.product_id] ?? null);
+/** Up to `limit` clients matching the search text (name, company, ח.פ., phone or nickname). Empty search: clients with a price list. */
+function clientMatches(q, limit = 25) {
+  const t = String(q || "").trim().toLowerCase();
+  const list = D.clients.filter((c) => c.active !== false);
+  if (!t) return list.filter((c) => D.priceMap[c.id]).slice(0, limit);
+  return list.filter((c) => [c.business_name, c.legal_name, c.company_number, c.phone, ...(c.aliases || [])].some((x) => x && String(x).toLowerCase().includes(t))).slice(0, limit);
+}
 const bizTotal = (o) => businessTotal(o.order_items, D.priceMap[o.client_id] || {});
 
 let toastTimer = null;
@@ -552,8 +559,11 @@ function renderSettings() {
   h += '<div class="panel"><h2>לקוחות עסקיים</h2><p>אפשר גם להוסיף לקוח ידנית. כדי להפיק לו תעודות משלוח הוא צריך להיות קיים גם במורנינג.</p>' +
     '<div class="rowform"><div class="field"><label for="cl-b">שם העסק</label><input id="cl-b"></div><div class="field"><label for="cl-c">איש קשר</label><input id="cl-c"></div><div class="field"><label for="cl-p">טלפון</label><input id="cl-p" dir="ltr"></div></div>' +
     '<div class="rowform"><div class="field"><label for="cl-l">שם החברה</label><input id="cl-l"></div><div class="field"><label for="cl-h">ח.פ.</label><input id="cl-h" dir="ltr"></div><div class="field"><label for="cl-city">עיר</label><input id="cl-city"></div><div class="field"><label for="cl-st">רחוב ומספר</label><input id="cl-st"></div><button class="btn small sea" data-act="client-add">הוספה</button></div>';
-  if (D.clients.length) h += '<div class="tscroll"><table class="t"><thead><tr><th>עסק</th><th>איש קשר</th><th>טלפון</th><th>כתובת</th><th>מחירים</th></tr></thead><tbody>' +
-    D.clients.map((c) => "<tr><td>" + esc(c.business_name) + "</td><td>" + esc(c.contact_name || "") + '</td><td class="num" dir="ltr">' + esc(c.phone || "") + "</td><td>" + esc(fullAddr(c.address)) + '</td><td><button class="btn small" data-act="prices:' + c.id + '">מחירון (' + Object.keys(D.priceMap[c.id] || {}).length + ")</button></td></tr>").join("") + "</tbody></table></div>";
+  const shown = clientMatches(ui.clientQ);
+  h += '<div class="field"><label for="cl-search">חיפוש לקוח (' + D.clients.length.toLocaleString("he-IL") + ' לקוחות)</label><input id="cl-search" data-search="clients" value="' + esc(ui.clientQ || "") + '" placeholder="שם, ח.פ. או טלפון" autocomplete="off"></div>' +
+    (!ui.clientQ ? '<p class="muted">' + (shown.length ? "מוצגים לקוחות שיש להם מחירון. חפשו כדי למצוא אחרים." : "חפשו לקוח כדי לראות או לערוך את המחירון שלו.") + "</p>" : !shown.length ? '<p class="muted">לא נמצא לקוח</p>' : "");
+  if (shown.length) h += '<div class="tscroll"><table class="t"><thead><tr><th>עסק</th><th>איש קשר</th><th>טלפון</th><th>כתובת</th><th>מחירים</th></tr></thead><tbody>' +
+    shown.map((c) => "<tr><td>" + esc(c.business_name) + "</td><td>" + esc(c.contact_name || "") + '</td><td class="num" dir="ltr">' + esc(c.phone || "") + "</td><td>" + esc(fullAddr(c.address)) + '</td><td><button class="btn small" data-act="prices:' + c.id + '">מחירון (' + Object.keys(D.priceMap[c.id] || {}).length + ")</button></td></tr>").join("") + "</tbody></table></div>";
   h += "</div>";
   // products
   h += '<div class="panel"><h2>מוצרים</h2><p>מחיר באתר משמש לחישוב הפרש כשמוסיפים מוצר בזמן האריזה.</p>' +
@@ -633,7 +643,11 @@ function renderOrderForm(m) {
       fld("f-window", "חלון זמן", v.time_window, "ltr") + fld("f-city", "עיר", v.city) + fld("f-street", "רחוב", v.street) + fld("f-building", "מספר בניין", v.building) +
       fld("f-entrance", "כניסה", v.entrance) + fld("f-floor", "קומה", v.floor) + fld("f-apt", "דירה", v.apt);
   } else {
-    h += '<div class="field"><label for="f-client">לקוח</label><select id="f-client">' + D.clients.filter((c) => c.active !== false).map((c) => '<option value="' + c.id + '" ' + (c.id === v.client_id ? "selected" : "") + ">" + esc(c.business_name) + "</option>").join("") + "</select></div>" +
+    const chosen = v.client_id ? client(v.client_id) : null;
+    h += '<div class="field" style="grid-column:1/-1"><label for="f-client-q">לקוח</label><input type="hidden" id="f-client" value="' + esc(v.client_id || "") + '">' +
+      (chosen ? '<div class="rowform"><b>' + esc(chosen.business_name) + '</b>' + (chosen.company_number ? ' <span class="muted num">ח.פ. ' + esc(chosen.company_number) + "</span>" : "") + '<button class="linkbtn" data-act="client-clear">החלפה</button></div>'
+        : '<input id="f-client-q" data-search="formclient" value="' + esc(v.client_q || "") + '" placeholder="הקלידו שם לקוח, ח.פ. או טלפון" autocomplete="off">' +
+          (v.client_q ? '<div class="picklist">' + (clientMatches(v.client_q, 8).map((c) => '<button class="clientpick" data-act="pick-client:' + c.id + '">' + esc(c.business_name) + (c.company_number ? ' <span class="muted num">' + esc(c.company_number) + "</span>" : "") + "</button>").join("") || '<span class="muted">לא נמצא לקוח</span>') + "</div>" : "")) + "</div>" +
       '<div class="field"><label for="f-date">יום</label><select id="f-date">' + dateOptions(v.delivery_date) + "</select></div>" +
       '<div class="field"><label for="f-pick">איסוף עצמי</label><select id="f-pick"><option value="0" ' + (!v.pickup ? "selected" : "") + '>לא, משלוח</option><option value="1" ' + (v.pickup ? "selected" : "") + ">כן</option></select></div>";
   }
@@ -661,7 +675,7 @@ function syncForm() {
   const m = ui.modal; if (!m || m.type !== "form") return;
   const v = m.values;
   if (m.kind === "private") Object.assign(v, { customer_name: gv("f-name"), phone: gv("f-phone"), pickup: gv("f-type") === "pickup", delivery_date: gv("f-date"), time_window: gv("f-window"), city: gv("f-city"), street: gv("f-street"), building: gv("f-building"), entrance: gv("f-entrance"), floor: gv("f-floor"), apt: gv("f-apt") });
-  else Object.assign(v, { client_id: gv("f-client"), delivery_date: gv("f-date"), pickup: gv("f-pick") === "1" });
+  else Object.assign(v, { client_id: gv("f-client") || null, delivery_date: gv("f-date"), pickup: gv("f-pick") === "1" });
   if (!m.id) m.rows.forEach((r, i) => { r.p = gv("r-p-" + i); r.a = gv("r-a-" + i); if (m.kind === "business") r.c = gv("r-c-" + i); });
 }
 function openForm(kind, id) {
@@ -672,7 +686,7 @@ function openForm(kind, id) {
   } else {
     if (kind === "business" && !D.clients.length) { toast("אין עדיין לקוחות עסקיים. הוסיפו לקוח בהגדרות."); return; }
     const d = nextDeliveryDay(TODAY(), { inclusive: true, holidays: holidays() });
-    values = kind === "private" ? { pickup: false, delivery_date: d, time_window: "09:00-16:00", city: "תל אביב-יפו" } : { client_id: D.clients[0].id, delivery_date: d, pickup: false };
+    values = kind === "private" ? { pickup: false, delivery_date: d, time_window: "09:00-16:00", city: "תל אביב-יפו" } : { client_id: null, client_q: "", delivery_date: d, pickup: false };
   }
   ui.modal = { type: "form", kind, id, values, rows: [{}], wide: true };
   render();
@@ -689,6 +703,7 @@ async function saveForm() {
     if (!/^[0-9+\-\s]{9,}$/.test(v.phone)) return err("מספר טלפון לא תקין");
     if (!v.pickup && (!v.city || !v.street || !v.building)) return err("למשלוח צריך עיר, רחוב ומספר בניין");
   }
+  if (m.kind === "business" && !v.client_id) return err("בחרו לקוח");
   if (!v.pickup && !isDeliveryDay(v.delivery_date, hol)) return err("ביום ראשון יש איסוף עצמי בלבד. סמנו איסוף עצמי או בחרו יום אחר");
   const address = m.kind === "private" && !v.pickup ? { city: v.city, street: v.street, building: v.building, entrance: v.entrance, floor: v.floor, apt: v.apt } : {};
   if (m.id) {
@@ -828,6 +843,8 @@ document.addEventListener("click", (e) => {
     }
     case "morning-test": act(async () => { const r = await B.morning({ action: "test" }); toast(r.sandbox ? "החיבור למורנינג (סביבת ניסיון) תקין" : "החיבור למורנינג תקין"); }); break;
     case "morning-sync": act(async () => { const r = await B.morning({ action: "sync_clients" }); toast("סונכרנו " + r.total + " לקוחות (" + r.added + " חדשים)"); }); break;
+    case "pick-client": syncForm(); ui.modal.values.client_id = b; ui.modal.values.client_q = ""; render(); break;
+    case "client-clear": syncForm(); ui.modal.values.client_id = null; ui.focusId = "f-client-q"; render(); break;
     case "review-done": act(() => B.rpc("mark_email_handled", { p_id: b }), { okToast: "סומן כטופל" }); break;
     case "review-create": openFormFromEmail(b); break;
     case "prod-add": {
@@ -860,6 +877,8 @@ document.addEventListener("input", (e) => {
   const el = e.target;
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; delete ui.errs[el.dataset.key]; }
   if (el.dataset.adda) (ui.adding[el.dataset.adda] ||= {}).a = el.value;
+  if (el.dataset.search === "clients") { ui.clientQ = el.value; render(); }
+  if (el.dataset.search === "formclient" && ui.modal) { syncForm(); ui.modal.values.client_q = el.value; render(); }
 });
 document.addEventListener("change", (e) => {
   const el = e.target;
