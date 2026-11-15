@@ -486,7 +486,9 @@ function renderSettings() {
   const re = setting("route_end", "shop");
   h += '<div class="panel"><h2>סוף מסלול המשלוחים</h2><div class="seg" role="group"><button data-act="route:shop" aria-pressed="' + (re === "shop") + '">חזרה לחנות</button><button data-act="route:last_stop" aria-pressed="' + (re === "last_stop") + '">בעצירה האחרונה</button></div></div>';
   // clients
-  h += '<div class="panel"><h2>לקוחות עסקיים</h2><p>כשמורנינג יחובר, הרשימה תתעדכן ממנו אוטומטית. עד אז אפשר להוסיף כאן.</p>' +
+  h += '<div class="panel"><h2>מורנינג</h2><p>לקוחות עסקיים מגיעים ממורנינג. הסנכרון מוסיף לקוחות חדשים ומעדכן פרטי חברה, טלפון וכתובת. שמות העסקים שערכתם כאן נשמרים.</p>' +
+    '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div></div>';
+  h += '<div class="panel"><h2>לקוחות עסקיים</h2><p>אפשר גם להוסיף לקוח ידנית. כדי להפיק לו תעודות משלוח הוא צריך להיות קיים גם במורנינג.</p>' +
     '<div class="rowform"><div class="field"><label for="cl-b">שם העסק</label><input id="cl-b"></div><div class="field"><label for="cl-c">איש קשר</label><input id="cl-c"></div><div class="field"><label for="cl-p">טלפון</label><input id="cl-p" dir="ltr"></div></div>' +
     '<div class="rowform"><div class="field"><label for="cl-l">שם החברה</label><input id="cl-l"></div><div class="field"><label for="cl-h">ח.פ.</label><input id="cl-h" dir="ltr"></div><div class="field"><label for="cl-city">עיר</label><input id="cl-city"></div><div class="field"><label for="cl-st">רחוב ומספר</label><input id="cl-st"></div><button class="btn small sea" data-act="client-add">הוספה</button></div>';
   if (D.clients.length) h += '<div class="tscroll"><table class="t"><thead><tr><th>עסק</th><th>איש קשר</th><th>טלפון</th><th>כתובת</th><th>מחירים</th></tr></thead><tbody>' +
@@ -539,8 +541,10 @@ function renderModal() {
       '</tbody></table></div><div class="total num">סה״כ לפני מע״מ: <b>' + nis(bt.total) + "</b></div>" +
       (!isPacked(o) ? '<div class="msg bad">יש לארוז את ההזמנה לפני ההפקה.</div>' : "") +
       (bt.missing.length ? '<div class="msg bad">חסר מחיר שמור ללקוח עבור: ' + esc(bt.missing.join(", ")) + '. הוסיפו מחיר ב"פרטי הזמנה".</div>' : "") +
-      '<div class="msg info">החיבור למורנינג עוד לא הופעל. כשיופעל, הכפתור הזה ייצור את תעודת המשלוח.</div>' +
-      '<div class="mact"><button class="btn sea" disabled>הפקה</button><button class="btn" data-act="m-close">סגירה</button></div>';
+      (!c.morning_id ? '<div class="msg bad">הלקוח לא מקושר למורנינג. הריצו "סנכרון לקוחות ממורנינג" בהגדרות.</div>' : "") +
+      (m.err ? '<div class="msg bad">' + esc(m.err) + "</div>" : "") +
+      '<p>ההפקה יוצרת תעודת משלוח אמיתית במורנינג ונועלת את ההזמנה.</p>' +
+      '<div class="mact"><button class="btn sea" data-act="m-fire" ' + (isPacked(o) && !bt.missing.length && c.morning_id && !ui.busy ? "" : "disabled") + ">" + (ui.busy ? "מפיק…" : "הפקת תעודת משלוח") + '</button><button class="btn" data-act="m-close">ביטול</button></div>';
   } else if (m.type === "prices") {
     const c = client(m.cid);
     h += '<h3 id="m-title">מחירון · ' + esc(c.business_name) + '</h3><p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p><div class="pricegrid">' +
@@ -749,6 +753,16 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "prices": ui.modal = { type: "prices", cid: b, wide: true }; render(); break;
+    case "m-fire": {
+      const m = ui.modal, id = m.id; ui.busy = true; m.err = null; render();
+      B.morning({ action: "fire", order_id: id })
+        .then(async (r) => { ui.modal = null; await reload(); toast("תעודת משלוח " + (r.number || "") + " נוצרה במורנינג"); })
+        .catch((e) => { if (ui.modal) ui.modal.err = e.message; })
+        .finally(() => { ui.busy = false; render(); });
+      break;
+    }
+    case "morning-test": act(async () => { const r = await B.morning({ action: "test" }); toast(r.sandbox ? "החיבור למורנינג (סביבת ניסיון) תקין" : "החיבור למורנינג תקין"); }); break;
+    case "morning-sync": act(async () => { const r = await B.morning({ action: "sync_clients" }); toast("סונכרנו " + r.total + " לקוחות (" + r.added + " חדשים)"); }); break;
     case "review-done": act(() => B.rpc("mark_email_handled", { p_id: b }), { okToast: "סומן כטופל" }); break;
     case "review-create": openFormFromEmail(b); break;
     case "prod-add": {

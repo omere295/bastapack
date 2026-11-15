@@ -24,7 +24,7 @@ export function demoSeed(today = todayIL()) {
     { id: "c1", business_name: "מסעדת הנמל", contact_name: "יוסי אלון", legal_name: "הנמל הצפוני בע״מ", company_number: "515234871", phone: "052-7781203", address: { city: "תל אביב-יפו", street: "נמל תל אביב, האנגר", building: "12" }, aliases: ["הנמל"] },
     { id: "c2", business_name: "ביסטרו אלנבי", contact_name: "מאיה רז", legal_name: "א.ר. ביסטרו בע״מ", company_number: "516098432", phone: "054-3320918", address: { city: "תל אביב-יפו", street: "אלנבי", building: "64" }, aliases: [] },
     { id: "c3", business_name: "סושי צפון", contact_name: "אורי קדמי", legal_name: "צפון אוכל יפני בע״מ", company_number: "514877610", phone: "050-9912447", address: { city: "רמת גן", street: "ז׳בוטינסקי", building: "21" }, aliases: [] },
-  ].map((c) => ({ morning_id: null, active: true, ...c }));
+  ].map((c) => ({ morning_id: "demo-" + c.id, active: true, ...c }));
   const orders = [];
   const items = (oid, list) => list.map(([name, count, price, kg, option, note], i) => {
     const p = P(name);
@@ -193,6 +193,24 @@ export class DemoBackend {
         });
         this.db.orders.push(o); this._log("created", o); return id;
       }
+    }
+    fail("פעולה לא מוכרת");
+  }
+  async morning(body) {
+    this._admin();
+    if (body.action === "test") return { ok: true, demo: true };
+    if (body.action === "sync_clients") return { added: 0, updated: this.db.clients.length, total: this.db.clients.length };
+    if (body.action === "fire") {
+      const o = this.db.orders.find((x) => x.id === body.order_id);
+      if (!o || o.kind !== "business") fail("ההזמנה לא נמצאה");
+      if (o.status === "fired") fail("ההזמנה כבר הופקה");
+      if (o.status !== "packed") fail("יש לארוז את ההזמנה לפני ההפקה");
+      const prices = this.db.prices.filter((p) => p.client_id === o.client_id).map((p) => p.product_id);
+      const missing = o.order_items.filter((i) => !i.removed_at && !prices.includes(i.product_id)).map((i) => i.name);
+      if (missing.length) fail("חסר מחיר שמור ללקוח עבור: " + missing.join(", "));
+      o.status = "fired"; o.morning_doc_number = String(40000 + this.db.log.length); o.morning_doc_url = null;
+      this._log("fired", o, { doc: o.morning_doc_number });
+      return { number: o.morning_doc_number, url: null };
     }
     fail("פעולה לא מוכרת");
   }

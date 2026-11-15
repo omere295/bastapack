@@ -70,8 +70,9 @@ with sync_playwright() as p:
     pg.locator("#" + bid + " .toggle").click(); pg.wait_for_timeout(300)
     check(pg.locator("#" + bid + " .chip.pick").count() == 1, "business order marked self-pickup")
     pg.locator("#" + bid + " button:has-text('FIRE')").click()
-    check("מורנינג" in pg.inner_text(".modal"), "FIRE explains morning is not connected yet")
-    pg.click(".modal button:has-text('סגירה')")
+    check(pg.locator("#m-title").inner_text().startswith("הפקת"), "FIRE opens the delivery-note dialog")
+    check(pg.locator(".modal [data-act='m-fire']").is_disabled(), "FIRE is blocked until the order is packed")
+    pg.click(".modal button:has-text('ביטול')")
     # delete + trash + restore
     pg.locator("#" + bid + " button:has-text('מחיקה')").click(); pg.click("#m-ok"); pg.wait_for_timeout(300)
     check(pg.locator("#" + bid).count() == 0, "deleted order disappears")
@@ -92,6 +93,17 @@ with sync_playwright() as p:
     check("אין מיילים לבדיקה" in pg.inner_text("main"), "email marked as handled")
     pg.click(".brand"); pg.click(".tile:has-text('משלוחים')")
     check(pg.locator(".stop").count() >= 3, "deliver page lists stops")
+    # FIRE a packed business order (demo morning)
+    pg.click(".brand"); pg.click(".big.business")
+    fc = "#card-o-B1001"
+    if pg.locator(fc + ".open").count() == 0: pg.locator(fc + " .info").click()
+    for i in range(pg.locator(fc + " .winput").count()):
+        inp = pg.locator(fc + " .winput").first; inp.fill("2.5"); inp.press("Enter"); pg.wait_for_timeout(150)
+    pg.locator(fc + " .packbox").click(); pg.wait_for_timeout(300)
+    pg.locator(fc + " .info").click()
+    pg.locator(fc + " button:has-text('FIRE')").click()
+    pg.click(".modal [data-act='m-fire']"); pg.wait_for_timeout(400)
+    check("הופקה" in pg.inner_text(fc), "FIRE creates the delivery note and locks the order")
     # employee view
     pg.click("text=יציאה"); pg.fill("#lu", "basta"); pg.fill("#lp", "1234"); pg.click("button[type=submit]")
     pg.wait_for_selector(".big.private"); pg.click(".big.private")

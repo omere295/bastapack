@@ -98,6 +98,20 @@ export class SupabaseBackend {
 
   rpc(name, args) { return this._req("/rest/v1/rpc/" + name, { method: "POST", body: args }); }
 
+  /** Calls the morning Edge Function: {action: "test" | "sync_clients" | "fire", order_id?}. */
+  async morning(body) {
+    await this._fresh();
+    let res;
+    try {
+      res = await fetch(this.url + "/functions/v1/morning", {
+        method: "POST", headers: { apikey: this.key, Authorization: "Bearer " + this.session.access_token, "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+    } catch { throw new Error("אין חיבור לאינטרנט"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "החיבור למורנינג נכשל");
+    return data;
+  }
+
   upsertClientPrices(rows) {
     return this._req("/rest/v1/client_prices?on_conflict=client_id,product_id", { method: "POST", body: rows, prefer: "resolution=merge-duplicates" });
   }
