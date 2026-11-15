@@ -98,6 +98,27 @@ export class SupabaseBackend {
 
   rpc(name, args) { return this._req("/rest/v1/rpc/" + name, { method: "POST", body: args }); }
 
+  async loadRoute(day) {
+    const rows = await this._req("/rest/v1/delivery_routes?day=eq." + day + "&select=*");
+    return rows[0] || null;
+  }
+
+  /** Calls the route Edge Function: {action: "optimize" | "reorder", day, order?}. */
+  route(body) { return this._fn("route", body, "חישוב המסלול נכשל"); }
+
+  async _fn(name, body, fallback) {
+    await this._fresh();
+    let res;
+    try {
+      res = await fetch(this.url + "/functions/v1/" + name, {
+        method: "POST", headers: { apikey: this.key, Authorization: "Bearer " + this.session.access_token, "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+    } catch { throw new Error("אין חיבור לאינטרנט"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || fallback);
+    return data;
+  }
+
   /** Calls the morning Edge Function: {action: "test" | "sync_clients" | "fire", order_id?}. */
   async morning(body) {
     await this._fresh();

@@ -196,6 +196,19 @@ export class DemoBackend {
     }
     fail("פעולה לא מוכרת");
   }
+  async loadRoute(day) { return (this.db.routes || {})[day] || null; }
+  async route(body) {
+    const stops = this.db.orders.filter((o) => !o.deleted_at && !o.pickup && o.delivery_date === body.day);
+    let ids = stops.map((o) => o.id);
+    if (body.action === "reorder") { const pos = new Map(body.order.map((id, i) => [id, i])); ids.sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9)); }
+    else ids.reverse(); // the demo "optimizer" just picks a different order
+    const legs = ids.map((_, i) => ({ seconds: 420 + i * 60, meters: 2500 + i * 300 })).concat([{ seconds: 600, meters: 3000 }]);
+    const r = { day: body.day, stop_ids: ids, legs, points: Object.fromEntries(ids.map((id, i) => [id, { lat: 32.06 + i / 100, lng: 34.77 }])), unfound: [],
+      end_mode: "shop", optimized: body.action === "optimize", computed_at: new Date().toISOString(),
+      total_seconds: legs.reduce((s, l) => s + l.seconds, 0), total_meters: legs.reduce((s, l) => s + l.meters, 0) };
+    (this.db.routes ||= {})[body.day] = r;
+    return JSON.parse(JSON.stringify(r));
+  }
   async morning(body) {
     this._admin();
     if (body.action === "test") return { ok: true, demo: true };

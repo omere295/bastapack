@@ -19,7 +19,7 @@ const ui = {
   role: null, screen: "login", loginErr: "", busy: false, offline: false, loaded: false,
   open: new Set(), dayOpen: {}, editing: new Set(), drafts: {}, errs: {}, notes: {},
   selectMode: false, selected: new Set(), modal: null, toast: null,
-  flash: null, opening: null, shake: null, scrollTo: null, focusId: null, adding: {}, deliverDay: null, log: null,
+  flash: null, opening: null, shake: null, scrollTo: null, focusId: null, adding: {}, deliverDay: null, log: null, routes: {}, routeBusy: false,
 };
 const isAdmin = () => ui.role === "admin";
 const TODAY = () => todayIL();
@@ -379,26 +379,82 @@ function renderBulk() {
     '<button class="btn small danger" data-act="bulkdel" ' + (sel.length ? "" : "disabled") + ">מחיקה</button></div></div>";
 }
 
-function renderDeliver() {
+function deliverDays() {
   const t = TODAY();
-  const days = [...new Set(live().filter((o) => !o.pickup && o.delivery_date >= t && isDeliveryDay(o.delivery_date)).map((o) => o.delivery_date))].sort();
+  return [...new Set(live().filter((o) => !o.pickup && o.delivery_date >= t && isDeliveryDay(o.delivery_date)).map((o) => o.delivery_date))].sort();
+}
+async function loadRoute(day, force) {
+  if (!force && day in ui.routes) return;
+  ui.routes[day] = ui.routes[day] || null;
+  try { ui.routes[day] = await B.loadRoute(day); } catch (e) { toast(e.message); }
+  render();
+}
+async function routeCall(day, body, okToast) {
+  ui.routeBusy = true; render();
+  try { ui.routes[day] = await B.route({ ...body, day }); if (okToast) toast(okToast); }
+  catch (e) { toast(e.message); }
+  finally { ui.routeBusy = false; render(); }
+}
+let reorderTimer = null;
+function moveStop(day, id, dir) {
+  const r = ui.routes[day]; if (!r) return;
+  const ids = deliverStops(day).map((o) => o.id);
+  const i = ids.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  r.stop_ids = ids; r.legs = []; r.optimized = false; render();
+  clearTimeout(reorderTimer);
+  reorderTimer = setTimeout(() => routeCall(day, { action: "reorder", order: ids }), 1500);
+}
+/** Stops in route order; orders that arrived after the route was made go at the end. */
+function deliverStops(day) {
+  const stops = live().filter((o) => o.delivery_date === day && !o.pickup);
+  const r = ui.routes[day];
+  if (!r) return sortDay(stops);
+  const pos = new Map(r.stop_ids.map((id, i) => [id, i]));
+  return stops.slice().sort((a, b) => (pos.get(a.id) ?? 1e6) - (pos.get(b.id) ?? 1e6) || String(a.number).localeCompare(String(b.number), "en", { numeric: true }));
+}
+const mins = (s) => Math.max(1, Math.round(s / 60));
+const hm = (s) => { const m = Math.round(s / 60); return m >= 60 ? Math.floor(m / 60) + " ש׳ " + (m % 60) + " דק׳" : m + " דק׳"; };
+
+function renderDeliver() {
+  const days = deliverDays();
   const day = ui.deliverDay && days.includes(ui.deliverDay) ? ui.deliverDay : days[0];
-  let h = '<div class="toolbar"><div class="seg" role="group" aria-label="יום משלוח">' + days.map((d) => '<button class="num" data-act="dday:' + d + '" aria-pressed="' + (d === day) + '">' + esc(dayLabel(d)) + "</button>").join("") + '</div><span class="grow"></span>' +
-    '<button class="btn small" disabled title="יתווסף עם חיבור Google Maps">ייצוא PDF</button></div>';
+  let h = '<div class="toolbar no-print"><div class="seg" role="group" aria-label="יום משלוח">' + days.map((d) => '<button class="num" data-act="dday:' + d + '" aria-pressed="' + (d === day) + '">' + esc(dayLabel(d)) + "</button>").join("") + "</div></div>";
   if (!day) return h + '<div class="empty">אין משלוחים מתוכננים</div>';
-  const stops = sortDay(live().filter((o) => o.delivery_date === day && !o.pickup));
+  if (!(day in ui.routes)) { loadRoute(day); }
+  const r = ui.routes[day];
+  const stops = deliverStops(day);
+  const inRoute = new Set(r ? r.stop_ids : []);
+  const fresh = r ? stops.filter((o) => !inRoute.has(o.id)) : [];
+  const unfound = new Set(r ? r.unfound : []);
   const unpacked = stops.filter((o) => !isPacked(o)).length;
-  h += '<div class="panel" style="margin-bottom:14px"><h2 class="num">' + esc(dayLabel(day)) + " · " + stops.length + " עצירות</h2>" +
-    "<p>סידור המסלול האוטומטי ב-Google Maps ייכנס כאן כשהחשבון יחובר. בינתיים העצירות לפי מספר הזמנה.</p>" +
-    (unpacked ? '<div class="msg bad num">' + unpacked + " הזמנות עדיין לא ארוזות</div>" : '<div class="msg good">כל ההזמנות ארוזות</div>') + "</div>";
+  const back = (r ? r.end_mode : setting("route_end", "shop")) === "shop";
+  const legsOk = r && r.legs && r.legs.length && !fresh.length;
+  h += '<div class="panel route-head"><div class="print-only"><img src="logo-white.png" alt="" class="print-logo"></div>' +
+    '<h2 class="num">' + esc(dayLabel(day)) + " · " + stops.length + " עצירות" + (legsOk ? " · " + hm(r.total_seconds) + " נסיעה · " + fmt(r.total_meters / 1000, 1) + " ק״מ" : "") + "</h2>" +
+    '<div class="rowform no-print"><button class="btn small sea" data-act="route-opt:' + day + '" ' + (ui.routeBusy ? "disabled" : "") + ">" + (ui.routeBusy ? "מחשב מסלול…" : r ? "סידור מסלול מחדש" : "סידור מסלול אוטומטי") + '</button><button class="btn small" data-act="route-pdf" ' + (stops.length ? "" : "disabled") + ">ייצוא PDF</button></div>" +
+    (r ? '<p class="stamp no-print">' + (r.optimized ? "מסלול מהיר ביותר לפי Google" : "סדר ידני") + " · עודכן " + esc(new Intl.DateTimeFormat("he-IL", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(r.computed_at))) + "</p>" : '<p class="no-print">לחצו על "סידור מסלול אוטומטי" כדי לקבל את הסדר המהיר ביותר מהחנות.</p>') +
+    (fresh.length ? '<div class="msg info no-print">' + fresh.length + " הזמנות נוספו אחרי חישוב המסלול. לחצו \"סידור מסלול מחדש\".</div>" : "") +
+    (unfound.size ? '<div class="msg bad">' + unfound.size + ' כתובות לא נמצאו במפה. תקנו אותן ב"פרטי הזמנה" ואז חשבו מחדש.</div>' : "") +
+    (unpacked ? '<div class="msg bad num no-print">' + unpacked + " הזמנות עדיין לא ארוזות</div>" : '<div class="msg good no-print">כל ההזמנות ארוזות</div>') + "</div>";
   h += '<div class="stops"><div class="stop start"><span class="n">⌂</span><div><b>יציאה</b><div class="imeta">' + esc(setting("shop_address", "מקווה ישראל 22, תל אביב")) + "</div></div><span></span></div>";
   stops.forEach((o, i) => {
     const c = o.kind === "business" ? client(o.client_id) : null;
-    h += '<div class="stop"><span class="n num">' + (i + 1) + '</span><div style="min-width:0"><b>' + esc(oName(o)) + '</b> <span class="onum num">' + (o.kind === "private" ? "#" : "") + esc(o.number) + "</span>" +
-      '<div class="imeta">' + esc(fullAddr(c ? c.address : o.address)) + '</div><div class="imeta num">' + esc(c ? c.phone || "" : o.phone) + " · " + items(o).length + " פריטים" + (o.time_window ? " · " + esc(o.time_window) : "") + "</div></div>" +
-      (isPacked(o) ? '<span class="chip ok">ארוזה</span>' : '<span class="chip warn">לא ארוזה</span>') + "</div>";
+    const pt = r && r.points ? r.points[o.id] : null;
+    const leg = legsOk ? r.legs[i] : null;
+    const nav = pt ? "https://waze.com/ul?ll=" + pt.lat + "," + pt.lng + "&navigate=yes" : "https://waze.com/ul?q=" + encodeURIComponent(fullAddr(c ? c.address : o.address)) + "&navigate=yes";
+    const notes = items(o).filter((it) => it.note).length;
+    h += '<div class="stop' + (unfound.has(o.id) ? " bad" : "") + '"><span class="n num">' + (i + 1) + '</span><div style="min-width:0">' +
+      (leg ? '<div class="stamp num">' + mins(leg.seconds) + " דק׳ מהעצירה הקודמת</div>" : "") +
+      "<b>" + esc(oName(o)) + '</b> <span class="onum num">' + (o.kind === "private" ? "#" : "") + esc(o.number) + "</span>" +
+      '<div class="imeta">' + esc(fullAddr(c ? c.address : o.address)) + (unfound.has(o.id) ? ' <span class="chip warn">כתובת לא נמצאה</span>' : "") + "</div>" +
+      '<div class="imeta num">' + esc(c ? c.phone || "" : o.phone) + " · " + items(o).length + " פריטים" + (o.time_window ? " · " + esc(o.time_window) : "") + (notes ? " · " + notes + " הערות" : "") + "</div>" +
+      '<div class="print-only imeta">ניווט: ' + esc(nav) + "</div></div>" +
+      '<div class="stopact no-print">' + (isPacked(o) ? '<span class="chip ok">ארוזה</span>' : '<span class="chip warn">לא ארוזה</span>') +
+      '<a class="btn small" href="' + esc(nav) + '" target="_blank" rel="noopener">Waze</a>' +
+      (r ? '<span class="updown"><button class="ghost" data-act="mv:' + day + ":" + o.id + ':-1" aria-label="למעלה" ' + (i ? "" : "disabled") + '>▲</button><button class="ghost" data-act="mv:' + day + ":" + o.id + ':1" aria-label="למטה" ' + (i < stops.length - 1 ? "" : "disabled") + ">▼</button></span>" : "") + "</div></div>";
   });
-  if (setting("route_end", "shop") === "shop") h += '<div class="stop start"><span class="n">⌂</span><div><b>חזרה לחנות</b></div><span></span></div>';
+  if (back) h += '<div class="stop start"><span class="n">⌂</span><div>' + (legsOk ? '<div class="stamp num">' + mins(r.legs[r.legs.length - 1].seconds) + " דק׳ מהעצירה האחרונה</div>" : "") + "<b>חזרה לחנות</b></div><span></span></div>";
   return h + "</div>";
 }
 
@@ -742,6 +798,9 @@ document.addEventListener("click", (e) => {
     case "diffcsv": ui.modal = { type: "csv", mode: "diffs", wide: true }; render(); break;
     case "restore": act(() => B.rpc("restore_order", { p_order: b }), { okToast: "ההזמנה שוחזרה" }); break;
     case "dday": ui.deliverDay = b; render(); break;
+    case "route-opt": routeCall(b, { action: "optimize" }, "המסלול סודר"); break;
+    case "route-pdf": window.print(); break;
+    case "mv": { const parts = rest.split(":"); moveStop(parts[0], parts[1], Number(parts[2])); break; }
     case "hol-add": { const d = gv("hol-d"); if (!d) { toast("בחרו תאריך"); break; } act(() => B.addHoliday(d, gv("hol-n")), { okToast: "נוסף" }); break; }
     case "hol-del": act(() => B.removeHoliday(rest), { okToast: "הוסר" }); break;
     case "route": act(() => B.setSetting("route_end", b), { okToast: "נשמר" }); break;
