@@ -145,4 +145,5 @@ test("the prompt tells the AI today's date and the coming days", () => {
   const p = systemPrompt("2026-11-23");
   assert.match(p, /שני 2026-11-23/);
   assert.match(p, /שלישי 2026-11-24/);
+  assert.match(p, /אמילי/);
 });

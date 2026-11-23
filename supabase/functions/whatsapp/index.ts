@@ -107,7 +107,7 @@ async function process(payload: any) {
     try {
       if (m.type === "text") await handleMessage(deps, { id: m.id, phone, text: m.text?.body || "" });
       else if (await store.isAllowed(phone) && await store.saveIncoming({ id: m.id, phone, body: "[" + m.type + "]" }))
-        await send(phone, "כרגע אני מבין רק הודעות טקסט. אפשר להעביר אליי הודעה מהמסעדה או לכתוב את ההזמנה.");
+        await send(phone, "כרגע אני מבינה רק הודעות טקסט. אפשר להעביר אליי הודעה מהמסעדה או לכתוב את ההזמנה.");
     } catch (e) {
       console.error("assistant error", e);
       await send(phone, "משהו השתבש אצלי (" + ((e as Error).message || "שגיאה") + "). נסו שוב בעוד רגע.");
