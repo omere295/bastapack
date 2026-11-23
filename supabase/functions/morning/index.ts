@@ -3,6 +3,7 @@
 //   {action: "sync_clients"}         → copies business clients from morning into the app
 //   {action: "sync_items"}           → copies morning's item list (פריטים) into the app as the business product catalog
 //   {action: "fire", order_id}       → creates a delivery note (תעודת משלוח, type 200) for a packed Business order
+// The two sync actions also run on a schedule (pg_cron, migration 0014): those calls carry x-cron-key, checked in the database.
 // Secrets (Supabase → Edge Functions → Secrets): MORNING_API_KEY_ID, MORNING_API_KEY_SECRET.
 // Optional MORNING_ENV=sandbox to use morning's practice environment.
 // API: token from api.morning.co/idp/v1/oauth/token (OAuth client credentials, valid 1 hour);
@@ -60,6 +61,9 @@ async function morning(path: string, body?: unknown, method = body === undefined
 }
 
 // ---------- actions ----------
+/** Remembers when a sync last ran and what it did (shown in Settings). */
+const stamp = (key: string, result: unknown) =>
+  db("/rest/v1/settings?on_conflict=key", { method: "POST", body: JSON.stringify({ key, value: { at: new Date().toISOString(), ...(result as object) } }), headers: { Prefer: "resolution=merge-duplicates" } }).catch(() => {});
 async function syncClients() {
   const all: any[] = [];
   for (let page = 1; page <= 50; page++) {
@@ -73,6 +77,7 @@ async function syncClients() {
     phone: c.phone || c.mobile || "", active: c.active !== false, address: c.address || c.city ? { street: c.address || "", city: c.city || "" } : {},
   }));
   const res = await rpc("sync_morning_clients", { p_clients: rows });
+  await stamp("morning_clients_synced", { ...res, total: rows.length });
   return { ...res, total: rows.length };
 }
 
@@ -97,6 +102,7 @@ async function syncItems() {
   });
   if (!rows.length) throw new UserError("לא נמצאו פריטים במורנינג. הוסיפו פריטים במורנינג (הגדרות → פריטים) ונסו שוב.");
   const res = await rpc("sync_morning_items", { p_items: rows });
+  await stamp("morning_items_synced", { ...res, total: rows.length });
   return { ...res, total: rows.length };
 }
 
@@ -135,9 +141,12 @@ async function fire(orderId: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (roleOf(req) !== "admin") return json({ error: "פעולה למנהל בלבד" }, 403);
+  let body: any;
+  try { body = await req.json(); } catch { return json({ error: "בקשה לא תקינה" }, 400); }
+  const cron = !!req.headers.get("x-cron-key") && ["sync_items", "sync_clients"].includes(body?.action)
+    && (await rpc("check_cron_key", { p_key: req.headers.get("x-cron-key") }).catch(() => false)) === true;
+  if (!cron && roleOf(req) !== "admin") return json({ error: "פעולה למנהל בלבד" }, 403);
   try {
-    const body = await req.json();
     if (body.action === "test") { await morning("/clients/search", { page: 1, pageSize: 1 }); return json({ ok: true, sandbox: SANDBOX }); }
     if (body.action === "sync_clients") return json(await syncClients());
     if (body.action === "sync_items") return json(await syncItems());

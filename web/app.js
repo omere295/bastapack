@@ -577,6 +577,12 @@ function renderLog() {
 }
 async function loadLog() { try { ui.log = await B.loadLog(); } catch (e) { ui.log = []; toast(e.message); } render(); }
 
+/** " · מוצרים: עודכן 23/11 14:00" from the sync result the morning function saves in settings. */
+function syncStamp(key, label) {
+  const v = setting(key, null); if (!v || !v.at) return "";
+  const t = new Intl.DateTimeFormat("he-IL", { timeZone: TZ, day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(v.at));
+  return " " + label + ": עודכן " + esc(t) + (v.added ? " (" + v.added + " חדשים)" : "") + ".";
+}
 function renderSettings() {
   const prods = D.products.slice().sort((a, b) => a.name.localeCompare(b.name, "he"));
   let h = '<div class="setgrid">';
@@ -594,7 +600,8 @@ function renderSettings() {
     '<p class="muted">4 ק״מ מכסה בערך מיפו ועד הירקון. השינוי חל על המסלול הבא שמחשבים.</p></div>';
   // clients
   h += '<div class="panel"><h2>מורנינג</h2><p>לקוחות עסקיים ומוצרים עסקיים מגיעים ממורנינג. הסנכרון מוסיף חדשים ומעדכן קיימים. שמות העסקים שערכתם כאן נשמרים.</p>' +
-    '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small sea" data-act="morning-items">סנכרון מוצרים ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div></div>';
+    '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small sea" data-act="morning-items">סנכרון מוצרים ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div>' +
+    '<p class="muted">הסנכרון רץ גם לבד: מוצרים כל שעה (05:00–20:00), לקוחות פעמיים ביום.' + syncStamp("morning_items_synced", "מוצרים") + syncStamp("morning_clients_synced", "לקוחות") + "</p></div>";
   h += '<div class="panel"><h2>לקוחות עסקיים</h2><p>אפשר גם להוסיף לקוח ידנית. כדי להפיק לו תעודות משלוח הוא צריך להיות קיים גם במורנינג.</p>' +
     '<div class="rowform"><div class="field"><label for="cl-b">שם העסק</label><input id="cl-b"></div><div class="field"><label for="cl-c">איש קשר</label><input id="cl-c"></div><div class="field"><label for="cl-p">טלפון</label><input id="cl-p" dir="ltr"></div></div>' +
     '<div class="rowform"><div class="field"><label for="cl-l">שם החברה</label><input id="cl-l"></div><div class="field"><label for="cl-h">ח.פ.</label><input id="cl-h" dir="ltr"></div><div class="field"><label for="cl-city">עיר</label><input id="cl-city"></div><div class="field"><label for="cl-st">רחוב ומספר</label><input id="cl-st"></div><button class="btn small sea" data-act="client-add">הוספה</button></div>';
