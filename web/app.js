@@ -337,7 +337,9 @@ function renderBody(o) {
     const p = unitPrice(o, it);
     const siteQty = o.kind === "private" && it.ordered_count && !it.added_during_packing ? '<div class="qty num">כמות באתר: ' + fmt(Number(it.ordered_count)) + "</div>" : "";
     let meta = it.unit === "kg"
-      ? (siteQty ? "משקל משוער: " + kg(it.ordered_kg) + " ק״ג" : "הוזמן " + kg(it.ordered_kg || 0) + " ק״ג")
+      ? (siteQty ? "משקל משוער: " + kg(it.ordered_kg) + " ק״ג"
+        : it.ordered_kg == null && it.ordered_count ? "הוזמנו " + fmt(Number(it.ordered_count)) + " יח׳ · לשקילה" // pieces of a weighed product (business)
+        : "הוזמן " + kg(it.ordered_kg || 0) + " ק״ג")
       : (siteQty ? "" : "הוזמנו " + fmt(Number(it.ordered_count || 0)) + " יח׳");
     if (it.added_during_packing) meta = "נוסף בעת האריזה";
     if (isAdmin() && p != null) meta += (meta ? " · " : "") + nis(round2(p)) + (it.unit === "kg" ? "/ק״ג" : "/יח׳");

@@ -47,8 +47,8 @@ export function demoSeed(today = todayIL()) {
     const id = "o-B" + num;
     orders.push({ id, kind: "business", number: "B-" + num, delivery_date: date, time_window: null, pickup: !!pickup, customer_name: null, phone: null,
       address: {}, delivery_fee: 0, client_id: cid, status: "new", packed_at: null, deleted_at: null, morning_doc_number: null, source: "whatsapp",
-      order_items: list.map(([name, amt], i) => { const p = BP(name); return { id: "i-" + uid(), order_id: id, product_id: p.id, name, unit: p.unit,
-        ordered_count: p.unit === "unit" ? amt : null, ordered_kg: p.unit === "kg" ? amt : null, line_price: null, option: "", note: "", final_amount: null,
+      order_items: list.map(([name, amt, pcs, note], i) => { const p = BP(name); return { id: "i-" + uid(), order_id: id, product_id: p.id, name, unit: p.unit,
+        ordered_count: p.unit === "unit" || pcs ? amt : null, ordered_kg: p.unit === "kg" && !pcs ? amt : null, line_price: null, option: "", note: note || "", final_amount: null,
         confirmed: false, added_during_packing: false, removed_at: null, position: i + 1 }; }) });
   };
   const cut = "חתוך";
@@ -63,7 +63,7 @@ export function demoSeed(today = todayIL()) {
   priv(991, SUN, "הדס נחום", "054-7771230", true, null, [["פילה דניס טרי", 2, 104, 0.44], ["גיוזה עוף", 1, 30]]);
   biz(1001, D0, "c1", [["פילה סלמון נורווגי", 6], ["סשימי טונה אדומה", 2]]);
   biz(1002, D0, "c2", [["פילה לברק", 3], ["רוטב פונזו בסטה", 6]], true);
-  biz(1003, D1, "c3", [["סשימי טונה אדומה", 3], ["סשימי סלמון", 4]]);
+  biz(1003, D1, "c3", [["סשימי טונה אדומה", 3], ["סשימי סלמון", 4], ["פילה דניס", 2, true, "לפלט"]]);
   // one order already packed so every state shows
   const o = orders.find((x) => x.number === "984");
   o.order_items[0].final_amount = 0.21; o.order_items[1].final_amount = 0.32;

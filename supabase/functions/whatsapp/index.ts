@@ -57,7 +57,8 @@ const store = {
     return { number: o.number, kind: o.kind, date: o.delivery_date, status: o.status, pickup: o.pickup, client: o.clients?.business_name || null,
       customer: o.customer_name, morning_doc: o.morning_doc_number,
       items: o.order_items.filter((i: any) => !i.removed_at).sort((a: any, b: any) => a.position - b.position)
-        .map((i: any) => ({ name: i.name, unit: i.unit, ordered: Number(i.unit === "kg" ? i.ordered_kg : i.ordered_count), final: i.confirmed ? Number(i.final_amount) : null })) };
+        .map((i: any) => ({ name: i.name, unit: i.unit, ordered: Number(i.unit === "kg" && i.ordered_kg != null ? i.ordered_kg : i.ordered_count),
+          pieces: i.unit === "kg" && i.ordered_kg == null, note: i.note || undefined, final: i.confirmed ? Number(i.final_amount) : null })) };
   },
   rpc: (name: string, args: unknown) => db("/rest/v1/rpc/" + name, { method: "POST", body: JSON.stringify(args) }),
   addAllowed: (phone: string, name: string) => db("/rest/v1/whatsapp_allowed?on_conflict=phone", { method: "POST", body: JSON.stringify({ phone, name, is_owner: false }), headers: { Prefer: "resolution=merge-duplicates" } }),

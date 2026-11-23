@@ -132,6 +132,9 @@ with sync_playwright() as p:
     pg.select_option("#r-p-0", label="פילה לברק · 104"); pg.fill("#r-a-0", "2")
     pg.click(".modal button:has-text('יצירת הזמנה')"); pg.wait_for_timeout(400)
     check(pg.locator(".modal").count() == 0 and pg.locator(".card:has-text('ביסטרו אלנבי')").count() >= 2, "business order created with client search")
+    while pg.locator(".dayhead[aria-expanded='false']").count(): pg.locator(".dayhead[aria-expanded='false']").first.click(); pg.wait_for_timeout(100)
+    if pg.locator("#card-o-B1003.open").count() == 0: pg.locator("#card-o-B1003 .info").click()
+    check("הוזמנו 2 יח׳ · לשקילה" in pg.inner_text("#card-o-B1003"), "business item ordered in pieces shows as pieces to weigh")
     fc = "#card-o-B1001"
     if pg.locator(fc + ".open").count() == 0: pg.locator(fc + " .info").click()
     for i in range(pg.locator(fc + " .winput").count()):
