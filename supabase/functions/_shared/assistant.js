@@ -9,7 +9,8 @@
 //   claude(body) → Anthropic Messages API response,
 //   send(phone, text),
 //   today() → "YYYY-MM-DD" in Israel,
-//   model?: string
+//   model?: string,
+//   typing?(messageId)  → marks the message read and shows "typing…" in WhatsApp while Emily works
 // }
 // Risky actions (cancel, changing a saved price, allowed numbers, app changes) are never done straight away:
 // the tool stores them as pending and the sender must reply YES / כן. The YES is checked here in code,
@@ -20,7 +21,7 @@ const YES = /^(yes|y|ok|כן|אישור|מאשר|מאשרת|בטח|יאללה)$/
 const NO = /^(no|n|לא|ביטול|בטל|עזוב)$/i;
 const clean = (t) => String(t || "").trim().replace(/[.!?,\s]+$/g, "").replace(/^\s+/, "");
 
-export function systemPrompt(today) {
+export function systemPrompt(today, catalog = []) {
   const d = new Date(today + "T12:00:00Z");
   const lines = [];
   for (let i = 0; i < 8; i++) { const x = new Date(d); x.setUTCDate(d.getUTCDate() + i); lines.push(DAYS[x.getUTCDay()] + " " + x.toISOString().slice(0, 10)); }
@@ -42,7 +43,8 @@ export function systemPrompt(today) {
 - הפקה במורנינג (FIRE) ושינוי סיסמאות נעשים באפליקציה בלבד.
 - בקשה לשינוי או תיקון באפליקציה עצמה: לנסח אותה בבירור ולקרוא ל-request_app_change.
 - כשמציגים את עצמך או שואלים מי את: "אמילי, העוזרת של בסטה דגים". מדברים עלייך בלשון נקבה.
-- תשובות קצרות, בעברית, בסגנון וואטסאפ. אפשר *הדגשה*. בלי טבלאות.`;
+- תשובות קצרות, בעברית, בסגנון וואטסאפ. אפשר *הדגשה*. בלי טבלאות.` +
+    (catalog.length ? "\n\nקטלוג המוצרים (id · שם · יחידה). להשתמש ב-id מכאן ישירות, בלי find_products:\n" + catalog.map((p) => p.id + " · " + p.name + " · " + (p.unit === "unit" ? "יחידה" : "ק״ג")).join("\n") : "");
 }
 
 export const TOOLS = [
@@ -160,6 +162,7 @@ export async function handleMessage(deps, { id, phone, text }) {
   phone = normalizePhone(phone);
   if (!(await s.isAllowed(phone))) return null;
   if (!(await s.saveIncoming({ id, phone, body: text }))) return null; // WhatsApp sent it twice
+  if (deps.typing) { try { await deps.typing(id); } catch { /* only cosmetic */ } }
   const reply = async (t) => { await deps.send(phone, t); await s.saveOutgoing(phone, t); return t; };
 
   const pending = await s.getPending(phone);
@@ -184,7 +187,10 @@ export async function handleMessage(deps, { id, phone, text }) {
   while (msgs.length && msgs[0].role !== "user") msgs.shift();
   if (!msgs.length || msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: text });
 
-  const system = systemPrompt(deps.today());
+  let catalog = [];
+  try { catalog = await s.findProducts(""); } catch { /* the AI can still search */ }
+  // The fixed part (tools + rules + catalog) is cached by the API, so each turn starts faster and costs less.
+  const system = [{ type: "text", text: systemPrompt(deps.today(), catalog), cache_control: { type: "ephemeral" } }];
   for (let turn = 0; turn < 8; turn++) {
     const res = await deps.claude({ model: deps.model || "claude-sonnet-5-5", max_tokens: 1200, system, tools: TOOLS, messages: msgs });
     msgs.push({ role: "assistant", content: res.content });

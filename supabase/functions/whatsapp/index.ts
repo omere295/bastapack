@@ -78,6 +78,14 @@ async function send(phone: string, text: string) {
   if (!r.ok) console.error("whatsapp send failed", r.status, await r.text());
 }
 
+// Blue ticks + "typing…" for up to 25 seconds, or until Emily's reply arrives.
+async function typing(messageId: string) {
+  await fetch(GRAPH + "/" + env("WHATSAPP_PHONE_NUMBER_ID") + "/messages", {
+    method: "POST", headers: { Authorization: "Bearer " + env("WHATSAPP_TOKEN"), "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId, typing_indicator: { type: "text" } }),
+  });
+}
+
 async function claude(body: unknown) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST", headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(body),
@@ -99,7 +107,7 @@ async function validSignature(raw: string, header: string | null) {
   return diff === 0;
 }
 
-const deps = { store, send, claude, today, model: env("ASSISTANT_MODEL") || undefined };
+const deps = { store, send, claude, typing, today, model: env("ASSISTANT_MODEL") || undefined };
 
 async function process(payload: any) {
   for (const entry of payload.entry || []) for (const ch of entry.changes || []) for (const m of ch.value?.messages || []) {

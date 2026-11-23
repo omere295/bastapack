@@ -141,6 +141,17 @@ test("app change requests become an issue after YES", async () => {
   assert.match(r, /נרשמה/);
 });
 
+test("Emily shows typing and gets the catalog in her instructions", async () => {
+  const w = fakeWorld([say("היי")]);
+  const typed = [];
+  w.deps.typing = async (id) => { typed.push(id); };
+  await handleMessage(w.deps, { id: "m7", phone: OWNER, text: "היי" });
+  assert.deepEqual(typed, ["m7"]);
+  const sys = w.claudeCalls[0].system[0];
+  assert.match(sys.text, /p-salmon · סלמון · ק״ג/);
+  assert.deepEqual(sys.cache_control, { type: "ephemeral" });
+});
+
 test("the prompt tells the AI today's date and the coming days", () => {
   const p = systemPrompt("2026-11-23");
   assert.match(p, /שני 2026-11-23/);
