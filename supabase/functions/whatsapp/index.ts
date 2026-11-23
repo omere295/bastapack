@@ -1,0 +1,132 @@
+// WhatsApp webhook for the BastaPack assistant (logic in ../_shared/assistant.js).
+// Meta calls this address for every message to the assistant's number.
+//   GET  → Meta's one-time webhook check (hub.verify_token must equal WHATSAPP_VERIFY_TOKEN)
+//   POST → incoming messages; the signature is checked with WHATSAPP_APP_SECRET, Meta gets 200 at once,
+//          and the reply is worked out in the background.
+// Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY,
+// optional GITHUB_TOKEN (app change requests become issues in omere295/bastapack), ASSISTANT_MODEL, WHATSAPP_API_VERSION.
+
+import { handleMessage } from "../_shared/assistant.js";
+
+const env = (k: string) => Deno.env.get(k) || "";
+const SB_URL = env("SUPABASE_URL"), SB_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
+const GRAPH = "https://graph.facebook.com/" + (env("WHATSAPP_API_VERSION") || "v23.0");
+const REPO = "omere295/bastapack";
+
+async function db(path: string, init: RequestInit = {}) {
+  const res = await fetch(SB_URL + path, { ...init, headers: { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json", ...(init.headers || {}) } });
+  const t = await res.text(); const d = t ? JSON.parse(t) : null;
+  if (!res.ok) throw new Error((d && d.message) || "שגיאת מסד נתונים");
+  return d;
+}
+const eq = (v: string) => "eq." + encodeURIComponent(v);
+const like = (q: string) => encodeURIComponent("*" + q.replace(/[,()*"\\]/g, " ").trim() + "*");
+const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
+
+const store = {
+  isAllowed: async (p: string) => (await db("/rest/v1/whatsapp_allowed?select=phone&phone=" + eq(p))).length > 0,
+  isOwner: async (p: string) => (await db("/rest/v1/whatsapp_allowed?select=phone&is_owner=is.true&phone=" + eq(p))).length > 0,
+  saveIncoming: async (m: { id: string; phone: string; body: string }) =>
+    (await db("/rest/v1/wa_messages?on_conflict=id", { method: "POST", body: JSON.stringify({ id: m.id, phone: m.phone, direction: "in", body: m.body }), headers: { Prefer: "resolution=ignore-duplicates,return=representation" } })).length > 0,
+  saveOutgoing: (phone: string, body: string) => db("/rest/v1/wa_messages", { method: "POST", body: JSON.stringify({ id: "out-" + crypto.randomUUID(), phone, direction: "out", body }) }),
+  history: async (phone: string, n: number) => (await db("/rest/v1/wa_messages?select=direction,body&phone=" + eq(phone) + "&created_at=gte." + new Date(Date.now() - 12 * 3600_000).toISOString() + "&order=created_at.desc&limit=" + n)).reverse(),
+  getPending: async (phone: string) => (await db("/rest/v1/wa_pending?select=*&phone=" + eq(phone)))[0] || null,
+  setPending: (phone: string, p: any) => db("/rest/v1/wa_pending?on_conflict=phone", { method: "POST", body: JSON.stringify({ phone, ...p, created_at: new Date().toISOString() }), headers: { Prefer: "resolution=merge-duplicates" } }),
+  clearPending: (phone: string) => db("/rest/v1/wa_pending?phone=" + eq(phone), { method: "DELETE" }),
+  findClients: async (q: string) => {
+    if (!q.trim()) return [];
+    const L = like(q), alias = encodeURIComponent('{"' + q.replace(/["\\{}]/g, "").trim() + '"}');
+    const rows = await db("/rest/v1/clients?select=id,business_name,legal_name,company_number,phone,aliases,address&active=is.true&limit=8&or=(business_name.ilike." + L + ",legal_name.ilike." + L + ",company_number.ilike." + L + ",phone.ilike." + L + ",aliases.cs." + alias + ")");
+    return rows.map((c: any) => ({ id: c.id, name: c.business_name, legal_name: c.legal_name, company_number: c.company_number, aliases: c.aliases, city: c.address?.city || null }));
+  },
+  findProducts: (q: string) => db("/rest/v1/products?select=id,name,unit&active=is.true&order=name" + (q.trim() ? "&name=ilike." + like(q) : "")),
+  clientPrices: async (c: string) => (await db("/rest/v1/client_prices?select=product_id,price,products(name,unit)&client_id=" + eq(c)))
+    .map((r: any) => ({ product_id: r.product_id, product: r.products?.name, unit: r.products?.unit, price: Number(r.price) })),
+  listOrders: async (f: { date: string | null; kind: string | null; status: string | null }) => {
+    let q = "/rest/v1/orders?select=number,kind,delivery_date,status,pickup,customer_name,clients(business_name),order_items(removed_at)&deleted_at=is.null&order=delivery_date,number&limit=80";
+    q += f.date ? "&delivery_date=eq." + f.date : "&delivery_date=gte." + today();
+    if (f.kind) q += "&kind=eq." + f.kind;
+    if (f.status) q += "&status=eq." + f.status;
+    return (await db(q)).map((o: any) => ({ number: o.number, kind: o.kind, date: o.delivery_date, status: o.status, pickup: o.pickup,
+      name: o.kind === "business" ? o.clients?.business_name : o.customer_name, items: o.order_items.filter((i: any) => !i.removed_at).length }));
+  },
+  getOrder: async (n: string) => {
+    const [o] = await db("/rest/v1/orders?select=*,order_items(*),clients(business_name)&deleted_at=is.null&number=" + eq(n));
+    if (!o) return null;
+    return { number: o.number, kind: o.kind, date: o.delivery_date, status: o.status, pickup: o.pickup, client: o.clients?.business_name || null,
+      customer: o.customer_name, morning_doc: o.morning_doc_number,
+      items: o.order_items.filter((i: any) => !i.removed_at).sort((a: any, b: any) => a.position - b.position)
+        .map((i: any) => ({ name: i.name, unit: i.unit, ordered: Number(i.unit === "kg" ? i.ordered_kg : i.ordered_count), final: i.confirmed ? Number(i.final_amount) : null })) };
+  },
+  rpc: (name: string, args: unknown) => db("/rest/v1/rpc/" + name, { method: "POST", body: JSON.stringify(args) }),
+  addAllowed: (phone: string, name: string) => db("/rest/v1/whatsapp_allowed?on_conflict=phone", { method: "POST", body: JSON.stringify({ phone, name, is_owner: false }), headers: { Prefer: "resolution=merge-duplicates" } }),
+  removeAllowed: (phone: string) => db("/rest/v1/whatsapp_allowed?is_owner=is.false&phone=" + eq(phone), { method: "DELETE" }),
+  createIssue: async (title: string, body: string) => {
+    if (!env("GITHUB_TOKEN")) throw new Error("החיבור ל-GitHub עוד לא הוגדר, אז הבקשה לא נשלחה");
+    const r = await fetch("https://api.github.com/repos/" + REPO + "/issues", { method: "POST", headers: { Authorization: "Bearer " + env("GITHUB_TOKEN"), Accept: "application/vnd.github+json", "Content-Type": "application/json", "User-Agent": "bastapack" }, body: JSON.stringify({ title, body, labels: ["whatsapp-change"] }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error("GitHub סירב: " + (d.message || r.status));
+    return d.html_url;
+  },
+};
+
+async function send(phone: string, text: string) {
+  const r = await fetch(GRAPH + "/" + env("WHATSAPP_PHONE_NUMBER_ID") + "/messages", {
+    method: "POST", headers: { Authorization: "Bearer " + env("WHATSAPP_TOKEN"), "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", to: phone.replace(/^\+/, ""), type: "text", text: { body: text.slice(0, 4000), preview_url: true } }),
+  });
+  if (!r.ok) console.error("whatsapp send failed", r.status, await r.text());
+}
+
+async function claude(body: unknown) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST", headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error("AI: " + (d.error?.message || r.status));
+  return d;
+}
+
+async function validSignature(raw: string, header: string | null) {
+  const secret = env("WHATSAPP_APP_SECRET");
+  if (!secret || !header?.startsWith("sha256=")) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(raw)));
+  const hex = [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const given = header.slice(7);
+  if (given.length !== hex.length) return false;
+  let diff = 0; for (let i = 0; i < hex.length; i++) diff |= hex.charCodeAt(i) ^ given.charCodeAt(i);
+  return diff === 0;
+}
+
+const deps = { store, send, claude, today, model: env("ASSISTANT_MODEL") || undefined };
+
+async function process(payload: any) {
+  for (const entry of payload.entry || []) for (const ch of entry.changes || []) for (const m of ch.value?.messages || []) {
+    const phone = "+" + String(m.from || "");
+    try {
+      if (m.type === "text") await handleMessage(deps, { id: m.id, phone, text: m.text?.body || "" });
+      else if (await store.isAllowed(phone) && await store.saveIncoming({ id: m.id, phone, body: "[" + m.type + "]" }))
+        await send(phone, "כרגע אני מבין רק הודעות טקסט. אפשר להעביר אליי הודעה מהמסעדה או לכתוב את ההזמנה.");
+    } catch (e) {
+      console.error("assistant error", e);
+      await send(phone, "משהו השתבש אצלי (" + ((e as Error).message || "שגיאה") + "). נסו שוב בעוד רגע.");
+    }
+  }
+}
+
+Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  if (req.method === "GET") {
+    const ok = url.searchParams.get("hub.mode") === "subscribe" && env("WHATSAPP_VERIFY_TOKEN") && url.searchParams.get("hub.verify_token") === env("WHATSAPP_VERIFY_TOKEN");
+    return ok ? new Response(url.searchParams.get("hub.challenge") || "") : new Response("forbidden", { status: 403 });
+  }
+  if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+  const raw = await req.text();
+  if (!(await validSignature(raw, req.headers.get("x-hub-signature-256")))) return new Response("bad signature", { status: 401 });
+  let payload; try { payload = JSON.parse(raw); } catch { return new Response("bad json", { status: 400 }); }
+  const work = process(payload);
+  // @ts-ignore EdgeRuntime exists on Supabase
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(work); else await work;
+  return new Response("ok");
+});
