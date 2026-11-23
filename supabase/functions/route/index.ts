@@ -4,7 +4,8 @@
 // Starts at the shop address (settings). Ends back at the shop, at the last stop, or at a custom address
 // (settings: route_end = shop | last_stop | custom, route_end_address).
 // Uses Google Geocoding (results cached) and Google Routes (computeRoutes). Secret: GOOGLE_MAPS_API_KEY.
-// Up to 25 stops Google picks the order. Above that a rough order comes from straight-line distances
+// Central Tel Aviv first: stops within route_center_km of the shop (setting, default 4 km) come first, then the rest.
+// In each part, up to 25 stops Google picks the order. Above that a rough order comes from straight-line distances
 // (nearest neighbour + 2-opt) and Google then orders each run of 25. "Last stop" mode tries the 3 furthest stops
 // as the end and keeps the quickest. Addresses Google only guessed at (other street/city, too far) count as not found.
 
@@ -105,6 +106,41 @@ function heuristicOrder(start: P, stops: P[], end: P | null) {
   return tour;
 }
 
+/** Best driving order for some stops (indexes into `pts`) from `from` to `to` (null = finish at the last stop). */
+async function orderSegment(pts: { p: P }[], from: P, idx: number[], to: P | null): Promise<{ seq: number[]; legs: { seconds: number; meters: number }[] }> {
+  if (idx.length <= 1) return { seq: idx.slice(), legs: [] };
+  if (to && idx.length <= 25) {
+    const r = await computeRoute(from, to, idx.map((i) => pts[i].p), true);
+    return r.order.length === idx.length ? { seq: r.order.map((k) => idx[k]), legs: r.legs } : { seq: idx.slice(), legs: [] };
+  }
+  if (!to && idx.length <= 26) {
+    // Google needs a fixed end point, so try the 3 stops furthest from the start as the last stop and keep the quickest.
+    const cands = idx.slice().sort((a, b) => dist(from, pts[b].p) - dist(from, pts[a].p)).slice(0, 3);
+    let best: { seq: number[]; legs: any[]; total: number } | null = null;
+    for (const far of cands) {
+      const rest = idx.filter((i) => i !== far);
+      const r = await computeRoute(from, pts[far].p, rest.map((i) => pts[i].p), true);
+      if (r.order.length !== rest.length && rest.length > 1) continue;
+      const s2 = (rest.length > 1 ? r.order.map((k) => rest[k]) : rest).concat(far);
+      if (!best || r.total < best.total) best = { seq: s2, legs: r.legs, total: r.total };
+    }
+    if (best) return { seq: best.seq, legs: best.legs };
+  }
+  // Many stops: a rough order first, then Google puts each run of up to 25 stops in the best driving order.
+  const roughLocal = heuristicOrder(from, idx.map((i) => pts[i].p), to);
+  const rough = roughLocal.map((k) => idx[k]);
+  const seq: number[] = [];
+  for (let i = 0; i < rough.length; i += 25) {
+    const chunk = rough.slice(i, i + 25);
+    const start = seq.length ? pts[seq[seq.length - 1]].p : from;
+    const next = rough[i + 25];
+    const end = next !== undefined ? pts[next].p : to;
+    if (!end || chunk.length < 2) { seq.push(...chunk); continue; }
+    const r = await computeRoute(start, end, chunk.map((k) => pts[k].p), true);
+    seq.push(...(r.order.length === chunk.length ? r.order.map((k) => chunk[k]) : chunk));
+  }
+  return { seq, legs: [] };
+}
 // ---------- main ----------
 const addrQuery = (a: any) => a && a.street ? [String(a.street) + (a.building ? " " + a.building : ""), a.city || "תל אביב", "ישראל"].join(", ") : null;
 
@@ -131,34 +167,20 @@ async function build(day: string, wanted: string[] | null) {
   if (wanted) {
     const pos = new Map(wanted.map((id, i) => [id, i]));
     seq = found.map((_, i) => i).sort((a, b) => (pos.get(found[a].id) ?? 1e9) - (pos.get(found[b].id) ?? 1e9));
-  } else if (found.length <= 1) seq = found.map((_, i) => i);
-  else if (endP && found.length <= 25) {
-    const r = await computeRoute(shop, endP, found.map((f) => f.p), true);
-    seq = r.order.length === found.length ? r.order : found.map((_, i) => i); legs = r.order.length === found.length ? r.legs : [];
-  } else if (endMode === "last_stop" && found.length <= 26) {
-    // Google needs a fixed end point, so try the 3 stops furthest from the shop as the last stop and keep the quickest.
-    const cands = found.map((_, i) => i).sort((a, b) => dist(shop, found[b].p) - dist(shop, found[a].p)).slice(0, 3);
-    let best: { seq: number[]; legs: any[]; total: number } | null = null;
-    for (const far of cands) {
-      const rest = found.map((_, i) => i).filter((i) => i !== far);
-      const r = await computeRoute(shop, found[far].p, rest.map((i) => found[i].p), true);
-      if (r.order.length !== rest.length && rest.length > 1) continue;
-      const s2 = (rest.length > 1 ? r.order.map((k) => rest[k]) : rest).concat(far);
-      if (!best || r.total < best.total) best = { seq: s2, legs: r.legs, total: r.total };
-    }
-    seq = best ? best.seq : heuristicOrder(shop, found.map((f) => f.p), null); legs = best ? best.legs : [];
   } else {
-    // More than 25 stops: a rough order first, then Google puts each run of up to 25 stops in the best driving order.
-    const rough = heuristicOrder(shop, found.map((f) => f.p), endP);
-    seq = [];
-    for (let i = 0; i < rough.length; i += 25) {
-      const chunk = rough.slice(i, i + 25);
-      const from = seq.length ? found[seq[seq.length - 1]].p : shop;
-      const next = rough[i + 25];
-      const to = next !== undefined ? found[next].p : endP;
-      if (!to || chunk.length < 2) { seq.push(...chunk); continue; }
-      const r = await computeRoute(from, to, chunk.map((k) => found[k].p), true);
-      seq.push(...(r.order.length === chunk.length ? r.order.map((k) => chunk[k]) : chunk));
+    // Central Tel Aviv first (stops within route_center_km of the shop, default 4 km), then the stops further out.
+    const R = Number(settings.route_center_km) > 0 ? Number(settings.route_center_km) : 4;
+    const all = found.map((_, i) => i);
+    const center = all.filter((i) => dist(shop, found[i].p) <= R), outer = all.filter((i) => dist(shop, found[i].p) > R);
+    if (!center.length || !outer.length) {
+      const r = await orderSegment(found, shop, all, endP);
+      seq = r.seq; legs = r.legs;
+    } else {
+      // head out of the centre towards the outer stop that is closest to the shop
+      let entry = outer[0]; for (const i of outer) if (dist(shop, found[i].p) < dist(shop, found[entry].p)) entry = i;
+      const a = await orderSegment(found, shop, center, found[entry].p);
+      const b = await orderSegment(found, found[a.seq[a.seq.length - 1]].p, outer, endP);
+      seq = [...a.seq, ...b.seq]; // drive times are worked out for the whole path below
     }
   }
   const path = [shop, ...seq.map((i) => found[i].p), ...(endP ? [endP] : [])];

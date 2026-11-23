@@ -84,10 +84,17 @@ async function syncItems() {
     all.push(...items);
     if (items.length < 100 || (r.pages && page >= r.pages)) break;
   }
-  const rows = all.filter((it) => it && it.id && it.name).map((it) => ({
-    morning_item_id: String(it.id), name: String(it.name).trim(), sku: String(it.sku ?? it.catalogNum ?? "").trim(),
-    price: typeof it.price === "number" ? it.price : null, active: it.active !== false,
-  }));
+  // In this morning account the item "name" holds the catalogue number (e.g. "012") and the real product name is in
+  // "description". When the name looks like a code, use it as the SKU and take the name from the description.
+  const isCode = (t: string) => /^[A-Za-z0-9\-_./]{1,15}$/.test(t) && /\d/.test(t);
+  const rows = all.filter((it) => it && it.id && (it.name || it.description)).map((it) => {
+    const name = String(it.name ?? "").trim(), desc = String(it.description ?? "").split("\n")[0].trim();
+    const code = isCode(name) && !!desc;
+    return {
+      morning_item_id: String(it.id), name: code ? desc : name || desc, sku: code ? name : String(it.sku ?? it.catalogNum ?? "").trim(),
+      price: typeof it.price === "number" ? it.price : null, active: it.active !== false,
+    };
+  });
   if (!rows.length) throw new UserError("לא נמצאו פריטים במורנינג. הוסיפו פריטים במורנינג (הגדרות → פריטים) ונסו שוב.");
   const res = await rpc("sync_morning_items", { p_items: rows });
   return { ...res, total: rows.length };
