@@ -13,10 +13,16 @@ const PRODUCTS = [
   ["טרטר טונה טרי", "kg", 420], ["טרטר סלמון נורווגי", "kg", 220], ["טרטר יילו טייל המאצ׳י", "kg", 460], ["קרפצ׳יו פלמידה לבנה", "kg", 460],
   ["פילה סלמון נורווגי לפי משקל", "kg", 155], ["פילה סלמון נורווגי פרוס טרי", "kg", 155], ["פילה דניס טרי", "kg", 236.36],
   ["פילה לברק טרי", "kg", 236.36], ["פילה לוקוס טרי", "kg", 380], ["גיוזה עוף", "unit", 30], ["צנצנת רוטב פונזו בסטה דגים", "unit", 20],
-].map(([name, unit, site_price]) => ({ id: "p-" + uid(), name, unit, site_price, active: true }));
+].map(([name, unit, site_price]) => ({ id: "p-" + uid(), name, unit, site_price, active: true, catalog: "private" }));
+// Business products come from morning's item list (the real app syncs them; see 0011_business_products.sql).
+const BIZ_PRODUCTS = [
+  ["פילה סלמון נורווגי", "kg", "101", 120], ["סשימי טונה אדומה", "kg", "102", 340], ["סשימי סלמון", "kg", "103", 175],
+  ["פילה לברק", "kg", "104", 190], ["פילה דניס", "kg", "012", 180], ["רוטב פונזו בסטה", "unit", "201", 18],
+].map(([name, unit, sku, list_price]) => ({ id: "b-" + uid(), name, unit, sku, list_price, active: true, catalog: "business", morning_item_id: "demo-item-" + sku }));
 
 export function demoSeed(today = todayIL()) {
   const P = (n) => PRODUCTS.find((p) => p.name === n);
+  const BP = (n) => BIZ_PRODUCTS.find((p) => p.name === n);
   const D0 = nextDeliveryDay(today, { inclusive: true }), D1 = nextDeliveryDay(D0), D2 = nextDeliveryDay(D1);
   let SUN = addDays(today, 1); while (weekday(SUN) !== 0) SUN = addDays(SUN, 1);
   let OVER = addDays(D0, -1); while (weekday(OVER) === 0 || weekday(OVER) === 6) OVER = addDays(OVER, -1);
@@ -41,7 +47,7 @@ export function demoSeed(today = todayIL()) {
     const id = "o-B" + num;
     orders.push({ id, kind: "business", number: "B-" + num, delivery_date: date, time_window: null, pickup: !!pickup, customer_name: null, phone: null,
       address: {}, delivery_fee: 0, client_id: cid, status: "new", packed_at: null, deleted_at: null, morning_doc_number: null, source: "whatsapp",
-      order_items: list.map(([name, amt], i) => { const p = P(name); return { id: "i-" + uid(), order_id: id, product_id: p.id, name, unit: p.unit,
+      order_items: list.map(([name, amt], i) => { const p = BP(name); return { id: "i-" + uid(), order_id: id, product_id: p.id, name, unit: p.unit,
         ordered_count: p.unit === "unit" ? amt : null, ordered_kg: p.unit === "kg" ? amt : null, line_price: null, option: "", note: "", final_amount: null,
         confirmed: false, added_during_packing: false, removed_at: null, position: i + 1 }; }) });
   };
@@ -55,23 +61,23 @@ export function demoSeed(today = todayIL()) {
   priv(987, D1, "שירה לוי", "054-2345443", true, null, [["סשימי טונה", 2, 84, 0.2, "גוש/ליין", "גוש מלבני להכנת טאטקי"], ["צנצנת רוטב פונזו בסטה דגים", 1, 20]]);
   priv(989, D2, "ליאת פרץ", "052-8585951", false, { city: "ירקונה", street: "הדקל", building: "9" }, [["פילה סלמון נורווגי לפי משקל", 2, 155, 1, "פילה עם עור"]]);
   priv(991, SUN, "הדס נחום", "054-7771230", true, null, [["פילה דניס טרי", 2, 104, 0.44], ["גיוזה עוף", 1, 30]]);
-  biz(1001, D0, "c1", [["פילה סלמון נורווגי לפי משקל", 6], ["סשימי טונה", 2]]);
-  biz(1002, D0, "c2", [["פילה לברק טרי", 3], ["צנצנת רוטב פונזו בסטה דגים", 6]], true);
-  biz(1003, D1, "c3", [["סשימי טונה", 3], ["סשימי סלמון נורווגי", 4]]);
+  biz(1001, D0, "c1", [["פילה סלמון נורווגי", 6], ["סשימי טונה אדומה", 2]]);
+  biz(1002, D0, "c2", [["פילה לברק", 3], ["רוטב פונזו בסטה", 6]], true);
+  biz(1003, D1, "c3", [["סשימי טונה אדומה", 3], ["סשימי סלמון", 4]]);
   // one order already packed so every state shows
   const o = orders.find((x) => x.number === "984");
   o.order_items[0].final_amount = 0.21; o.order_items[1].final_amount = 0.32;
   o.order_items.forEach((i) => (i.confirmed = true)); o.status = "packed"; o.packed_at = new Date().toISOString();
   const prices = [
-    ["c1", "פילה סלמון נורווגי לפי משקל", 128], ["c1", "סשימי טונה", 360], ["c2", "פילה לברק טרי", 205],
-    ["c3", "סשימי טונה", 365], ["c3", "סשימי סלמון נורווגי", 185],
-  ].map(([client_id, n, price]) => ({ client_id, product_id: P(n).id, price }));
+    ["c1", "פילה סלמון נורווגי", 128], ["c1", "סשימי טונה אדומה", 360], ["c2", "פילה לברק", 205],
+    ["c3", "סשימי טונה אדומה", 365], ["c3", "סשימי סלמון", 185],
+  ].map(([client_id, n, price]) => ({ client_id, product_id: BP(n).id, price }));
   const review = [{ id: "r1", gmail_id: "demo", received_at: new Date().toISOString(), status: "review", subject: "הזמנה בבסטה דגים תל אביב | משלוח | רון כץ | 342 ₪ | #993",
     problem: "סכום הפריטים (312.00) לא תואם לסה״כ (342)",
     parsed: { number: "993", delivery_date: D1, time_window: "09:00-16:00", pickup: false, customer_name: "רון כץ", phone: "0521112233",
       address: { city: "תל אביב-יפו", street: "בן יהודה", building: "120" }, delivery_fee: 30, total: 342,
       items: [{ name: "פילה סלמון נורווגי לפי משקל", count: 2, price: 155, kg: 1, note: "", option: "" }, { name: "פילה לברק טרי", count: 1, price: 52, kg: 0.22, note: "", option: "" }] } }];
-  return { review, orders, products: clone(PRODUCTS), clients, prices, holidays: [], settings: [{ key: "route_end", value: "shop" }, { key: "shop_address", value: "מקווה ישראל 22, תל אביב" }], log: [], seq: { b: 1004, m: 501 } };
+  return { review, orders, products: clone([...PRODUCTS, ...BIZ_PRODUCTS]), clients, prices, holidays: [], settings: [{ key: "route_end", value: "shop" }, { key: "shop_address", value: "מקווה ישראל 22, תל אביב" }], log: [], seq: { b: 1004, m: 501 } };
 }
 
 export class DemoBackend {
@@ -139,6 +145,7 @@ export class DemoBackend {
       case "add_item": {
         const o = this._editable(a.p_order); const p = this.db.products.find((x) => x.id === a.p_product && x.active);
         if (!p) fail("המוצר לא נמצא");
+        this._catalogOk(o.kind, p);
         if (!(a.p_amount > 0) || (p.unit === "unit" && !Number.isInteger(a.p_amount))) fail("כמות לא תקינה");
         const id = "i-" + uid();
         o.order_items.push({ id, order_id: o.id, product_id: p.id, name: p.name, unit: p.unit, ordered_count: p.unit === "unit" ? a.p_amount : null,
@@ -185,6 +192,7 @@ export class DemoBackend {
           client_id: p.client_id || null, status: "new", packed_at: null, deleted_at: null, morning_doc_number: null, source: "manual", order_items: [] };
         p.items.forEach((i, idx) => {
           const pr = this.db.products.find((x) => x.id === i.product_id); if (!pr) fail("מוצר לא נמצא");
+          this._catalogOk(p.kind, pr);
           o.order_items.push({ id: "i-" + uid(), order_id: id, product_id: pr.id, name: pr.name, unit: pr.unit,
             ordered_count: pr.unit === "unit" ? i.amount : null, ordered_kg: pr.unit === "kg" ? i.amount : null,
             line_price: p.kind === "private" ? Math.round(i.amount * pr.site_price * 100) / 100 : null, option: "", note: "",
@@ -214,6 +222,7 @@ export class DemoBackend {
     this._admin();
     if (body.action === "test") return { ok: true, demo: true };
     if (body.action === "sync_clients") return { added: 0, updated: this.db.clients.length, total: this.db.clients.length };
+    if (body.action === "sync_items") { const n = this.db.products.filter((p) => p.catalog === "business").length; return { added: 0, updated: n, deactivated: 0, total: n }; }
     if (body.action === "fire") {
       const o = this.db.orders.find((x) => x.id === body.order_id);
       if (!o || o.kind !== "business") fail("ההזמנה לא נמצאה");
@@ -235,7 +244,12 @@ export class DemoBackend {
   async upsertClientPrices(rows) { this._admin(); rows.forEach((r) => this._setPrice(r.client_id, r.product_id, r.price)); }
   async addClient(row) { this._admin(); const c = { id: "c-" + uid(), aliases: [], active: true, address: {}, ...row }; this.db.clients.push(c); return [c]; }
   async updateClient(id, patch) { this._admin(); Object.assign(this.db.clients.find((c) => c.id === id), patch); }
-  async addProduct(row) { this._admin(); if (this.db.products.some((p) => p.name === row.name)) fail("מוצר בשם הזה כבר קיים"); this.db.products.push({ id: "p-" + uid(), active: true, ...row }); }
+  async addProduct(row) { this._admin(); if (this.db.products.some((p) => p.catalog === "private" && p.name === row.name)) fail("מוצר בשם הזה כבר קיים"); this.db.products.push({ id: "p-" + uid(), active: true, catalog: "private", ...row }); }
+  /** Same rule as the order_items_catalog trigger (0011): business orders use morning items, private orders website products. */
+  _catalogOk(kind, p) {
+    if (kind === "business" && p.catalog !== "business") fail("בהזמנה עסקית אפשר לבחור רק מוצרים ממורנינג");
+    if (kind === "private" && p.catalog !== "private") fail("בהזמנה פרטית אפשר לבחור רק מוצרים מהאתר");
+  }
   async updateProduct(id, patch) { this._admin(); Object.assign(this.db.products.find((p) => p.id === id), patch); }
   async addHoliday(day, note) { this._admin(); if (!this.db.holidays.some((h) => h.day === day)) this.db.holidays.push({ day, note }); }
   async removeHoliday(day) { this._admin(); this.db.holidays = this.db.holidays.filter((h) => h.day !== day); }

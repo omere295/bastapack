@@ -1,6 +1,7 @@
 // morning (Green Invoice) connection. Called by the app with the admin's login.
 //   {action: "test"}                 → checks the API key works (reads one client, changes nothing)
 //   {action: "sync_clients"}         → copies business clients from morning into the app
+//   {action: "sync_items"}           → copies morning's item list (פריטים) into the app as the business product catalog
 //   {action: "fire", order_id}       → creates a delivery note (תעודת משלוח, type 200) for a packed Business order
 // Secrets (Supabase → Edge Functions → Secrets): MORNING_API_KEY_ID, MORNING_API_KEY_SECRET.
 // Optional MORNING_ENV=sandbox to use morning's practice environment.
@@ -75,10 +76,27 @@ async function syncClients() {
   return { ...res, total: rows.length };
 }
 
+async function syncItems() {
+  const all: any[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const r = await morning("/items/search", { page, pageSize: 100 });
+    const items = r?.items || [];
+    all.push(...items);
+    if (items.length < 100 || (r.pages && page >= r.pages)) break;
+  }
+  const rows = all.filter((it) => it && it.id && it.name).map((it) => ({
+    morning_item_id: String(it.id), name: String(it.name).trim(), sku: String(it.sku ?? it.catalogNum ?? "").trim(),
+    price: typeof it.price === "number" ? it.price : null, active: it.active !== false,
+  }));
+  if (!rows.length) throw new UserError("לא נמצאו פריטים במורנינג. הוסיפו פריטים במורנינג (הגדרות → פריטים) ונסו שוב.");
+  const res = await rpc("sync_morning_items", { p_items: rows });
+  return { ...res, total: rows.length };
+}
+
 async function fire(orderId: string) {
   await rpc("claim_fire", { p_order: orderId });
   try {
-    const [o] = await db("/rest/v1/orders?id=eq." + orderId + "&select=*,order_items(*),clients(*)");
+    const [o] = await db("/rest/v1/orders?id=eq." + orderId + "&select=*,order_items(*,products(morning_item_id,sku)),clients(*)");
     const c = o.clients;
     if (!c?.morning_id) throw new UserError("הלקוח לא מקושר למורנינג. הריצו סנכרון לקוחות בהגדרות.");
     const prices = await db("/rest/v1/client_prices?client_id=eq." + c.id + "&select=product_id,price");
@@ -94,6 +112,8 @@ async function fire(orderId: string) {
       client: { id: c.morning_id },
       income: items.map((i: any) => ({
         description: i.name + (i.unit === "kg" ? " (ק״ג)" : ""), quantity: Number(i.final_amount), price: priceOf[i.product_id], currency: "ILS", vatType: 0,
+        // linked to the morning item when the product came from morning, so morning's item reports include it
+        ...(i.products?.morning_item_id ? { itemId: i.products.morning_item_id } : {}), ...(i.products?.sku ? { catalogNum: i.products.sku } : {}),
       })),
     });
     let url = doc?.url?.he || doc?.url?.origin || doc?.files?.downloadLinks?.he || null;
@@ -113,6 +133,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     if (body.action === "test") { await morning("/clients/search", { page: 1, pageSize: 1 }); return json({ ok: true, sandbox: SANDBOX }); }
     if (body.action === "sync_clients") return json(await syncClients());
+    if (body.action === "sync_items") return json(await syncItems());
     if (body.action === "fire" && body.order_id) return json(await fire(String(body.order_id)));
     return json({ error: "פעולה לא מוכרת" }, 400);
   } catch (e) {

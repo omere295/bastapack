@@ -39,7 +39,8 @@ const store = {
     const rows = await db("/rest/v1/clients?select=id,business_name,legal_name,company_number,phone,aliases,address&active=is.true&limit=8&or=(business_name.ilike." + L + ",legal_name.ilike." + L + ",company_number.ilike." + L + ",phone.ilike." + L + ",aliases.cs." + alias + ")");
     return rows.map((c: any) => ({ id: c.id, name: c.business_name, legal_name: c.legal_name, company_number: c.company_number, aliases: c.aliases, city: c.address?.city || null }));
   },
-  findProducts: (q: string) => db("/rest/v1/products?select=id,name,unit&active=is.true&order=name" + (q.trim() ? "&name=ilike." + like(q) : "")),
+  // Emily only takes business orders, so she only sees the business catalog (morning items).
+  findProducts: (q: string) => db("/rest/v1/products?select=id,name,unit,sku&active=is.true&catalog=eq.business&order=name" + (q.trim() ? "&or=(name.ilike." + like(q) + ",sku.ilike." + like(q) + ")" : "")),
   clientPrices: async (c: string) => (await db("/rest/v1/client_prices?select=product_id,price,products(name,unit)&client_id=" + eq(c)))
     .map((r: any) => ({ product_id: r.product_id, product: r.products?.name, unit: r.products?.unit, price: Number(r.price) })),
   listOrders: async (f: { date: string | null; kind: string | null; status: string | null }) => {

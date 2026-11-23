@@ -59,6 +59,10 @@ let toastTimer = null;
 function toast(msg) { ui.toast = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { ui.toast = null; render(); }, 3000); }
 
 /* ---------- data ---------- */
+/** Active products for one kind of order: website products for private orders, morning items for business ones. */
+const catalog = (kind) => D.products.filter((p) => p.active && (p.catalog || "private") === kind).sort((a, b) => a.name.localeCompare(b.name, "he"));
+const prodLabel = (p) => p.name + (p.sku ? " · " + p.sku : "");
+const NO_BIZ_PRODUCTS = "אין עדיין מוצרים עסקיים. מנהל: הגדרות → \"סנכרון מוצרים ממורנינג\".";
 function index(data) {
   data.productsById = Object.fromEntries(data.products.map((p) => [p.id, p]));
   data.clientsById = Object.fromEntries(data.clients.map((c) => [c.id, c]));
@@ -358,7 +362,7 @@ function renderBody(o) {
     const a = ui.adding[o.id] || {};
     const ap = D.productsById[a.p];
     h += '<div class="addrow"><div class="field"><label for="ap-' + o.id + '">הוספת מוצר</label><select id="ap-' + o.id + '" data-addp="' + o.id + '"><option value="">בחירת מוצר…</option>' +
-      D.products.filter((p) => p.active).map((p) => '<option value="' + p.id + '" ' + (a.p === p.id ? "selected" : "") + ">" + esc(p.name) + "</option>").join("") + "</select></div>" +
+      catalog(o.kind).map((p) => '<option value="' + p.id + '" ' + (a.p === p.id ? "selected" : "") + ">" + esc(prodLabel(p)) + "</option>").join("") + "</select></div>" +
       '<div class="field amt"><label for="aa-' + o.id + '">' + (ap && ap.unit === "unit" ? "כמות (יח׳)" : "כמות (ק״ג)") + '</label><input id="aa-' + o.id + '" data-adda="' + o.id + '" inputmode="decimal" dir="ltr" value="' + esc(a.a || "") + '"></div>' +
       '<button class="btn small sea" data-act="add:' + o.id + '">הוספה</button></div>';
   }
@@ -546,7 +550,7 @@ function renderReview() {
 }
 function openFormFromEmail(rid) {
   const r = (D.review || []).find((x) => x.id === rid); const p = r && r.parsed; if (!p) return;
-  const byName = Object.fromEntries(D.products.map((x) => [x.name, x]));
+  const byName = Object.fromEntries(catalog("private").map((x) => [x.name, x]));
   const d = p.delivery_date && p.delivery_date >= TODAY() ? p.delivery_date : nextDeliveryDay(TODAY(), { inclusive: true, holidays: holidays() });
   ui.modal = { type: "form", kind: "private", id: null, wide: true,
     values: { customer_name: p.customer_name, phone: p.phone, pickup: !!p.pickup, delivery_date: d, time_window: p.time_window, ...(p.address || {}) },
@@ -585,8 +589,8 @@ function renderSettings() {
       (setting("route_end_address", "") ? "" : '<div class="msg bad">הזינו כתובת ושמרו, אחרת לא ניתן לחשב מסלול.</div>') : "") +
     '<p class="muted">השינוי חל על המסלול הבא שמחשבים.</p></div>';
   // clients
-  h += '<div class="panel"><h2>מורנינג</h2><p>לקוחות עסקיים מגיעים ממורנינג. הסנכרון מוסיף לקוחות חדשים ומעדכן פרטי חברה, טלפון וכתובת. שמות העסקים שערכתם כאן נשמרים.</p>' +
-    '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div></div>';
+  h += '<div class="panel"><h2>מורנינג</h2><p>לקוחות עסקיים ומוצרים עסקיים מגיעים ממורנינג. הסנכרון מוסיף חדשים ומעדכן קיימים. שמות העסקים שערכתם כאן נשמרים.</p>' +
+    '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small sea" data-act="morning-items">סנכרון מוצרים ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div></div>';
   h += '<div class="panel"><h2>לקוחות עסקיים</h2><p>אפשר גם להוסיף לקוח ידנית. כדי להפיק לו תעודות משלוח הוא צריך להיות קיים גם במורנינג.</p>' +
     '<div class="rowform"><div class="field"><label for="cl-b">שם העסק</label><input id="cl-b"></div><div class="field"><label for="cl-c">איש קשר</label><input id="cl-c"></div><div class="field"><label for="cl-p">טלפון</label><input id="cl-p" dir="ltr"></div></div>' +
     '<div class="rowform"><div class="field"><label for="cl-l">שם החברה</label><input id="cl-l"></div><div class="field"><label for="cl-h">ח.פ.</label><input id="cl-h" dir="ltr"></div><div class="field"><label for="cl-city">עיר</label><input id="cl-city"></div><div class="field"><label for="cl-st">רחוב ומספר</label><input id="cl-st"></div><button class="btn small sea" data-act="client-add">הוספה</button></div>';
@@ -597,10 +601,15 @@ function renderSettings() {
     shown.map((c) => "<tr><td>" + esc(c.business_name) + "</td><td>" + esc(c.contact_name || "") + '</td><td class="num" dir="ltr">' + esc(c.phone || "") + "</td><td>" + esc(fullAddr(c.address)) + '</td><td><button class="btn small" data-act="prices:' + c.id + '">מחירון (' + Object.keys(D.priceMap[c.id] || {}).length + ")</button></td></tr>").join("") + "</tbody></table></div>";
   h += "</div>";
   // products
-  h += '<div class="panel"><h2>מוצרים</h2><p>מחיר באתר משמש לחישוב הפרש כשמוסיפים מוצר בזמן האריזה.</p>' +
+  const biz = prods.filter((p) => p.catalog === "business");
+  h += '<div class="panel"><h2>מוצרים עסקיים (ממורנינג)</h2><p>הרשימה מגיעה מהפריטים במורנינג ומשמשת רק להזמנות עסקיות. מורנינג לא שומר יחידת מידה, אז בדקו שכל מוצר מסומן נכון: ק״ג או יחידה.</p>' +
+    (biz.length ? '<div class="tscroll"><table class="t"><thead><tr><th>מוצר</th><th>מק״ט</th><th>יחידה</th><th>מחיר במורנינג</th><th></th></tr></thead><tbody>' +
+      biz.map((p) => '<tr class="' + (p.active ? "" : "muted") + '"><td>' + esc(p.name) + '</td><td class="num">' + esc(p.sku || "") + '</td><td><div class="seg small" role="group"><button data-act="prod-unit:' + p.id + ':kg" aria-pressed="' + (p.unit === "kg") + '">ק״ג</button><button data-act="prod-unit:' + p.id + ':unit" aria-pressed="' + (p.unit === "unit") + '">יחידה</button></div></td><td class="num">' + (p.list_price != null ? nis(Number(p.list_price)) : "") + "</td><td>" + (p.active ? "" : '<span class="chip warn">נמחק במורנינג</span>') + "</td></tr>").join("") + "</tbody></table></div>"
+      : '<p class="muted">עדיין לא סונכרנו מוצרים. לחצו "סנכרון מוצרים ממורנינג" למעלה.</p>') + "</div>";
+  h += '<div class="panel"><h2>מוצרים מהאתר (הזמנות פרטיות)</h2><p>מחיר באתר משמש לחישוב הפרש כשמוסיפים מוצר בזמן האריזה.</p>' +
     '<div class="rowform"><div class="field"><label for="pr-n">שם המוצר</label><input id="pr-n"></div><div class="field"><label for="pr-u">יחידה</label><select id="pr-u"><option value="kg">ק״ג</option><option value="unit">יחידה</option></select></div><div class="field"><label for="pr-p">מחיר באתר (₪)</label><input id="pr-p" inputmode="decimal" dir="ltr"></div><button class="btn small sea" data-act="prod-add">הוספה</button></div>' +
     '<div class="tscroll"><table class="t"><thead><tr><th>מוצר</th><th>יחידה</th><th>מחיר באתר</th><th></th></tr></thead><tbody>' +
-    prods.map((p) => '<tr class="' + (p.active ? "" : "muted") + '"><td>' + esc(p.name) + "</td><td>" + (p.unit === "kg" ? "ק״ג" : "יחידה") + '</td><td class="num">' + (p.site_price != null ? nis(Number(p.site_price)) : "") + '</td><td><button class="linkbtn" data-act="prod-toggle:' + p.id + '">' + (p.active ? "השבתה" : "הפעלה") + "</button></td></tr>").join("") +
+    prods.filter((p) => (p.catalog || "private") === "private").map((p) => '<tr class="' + (p.active ? "" : "muted") + '"><td>' + esc(p.name) + "</td><td>" + (p.unit === "kg" ? "ק״ג" : "יחידה") + '</td><td class="num">' + (p.site_price != null ? nis(Number(p.site_price)) : "") + '</td><td><button class="linkbtn" data-act="prod-toggle:' + p.id + '">' + (p.active ? "השבתה" : "הפעלה") + "</button></td></tr>").join("") +
     "</tbody></table></div></div>";
   return h + "</div>";
 }
@@ -650,7 +659,8 @@ function renderModal() {
   } else if (m.type === "prices") {
     const c = client(m.cid);
     h += '<h3 id="m-title">מחירון · ' + esc(c.business_name) + '</h3><p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p><div class="pricegrid">' +
-      D.products.filter((p) => p.active).map((p) => { const v = (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(p.name) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="—">'; }).join("") +
+      (catalog("business").length ? "" : '<p class="msg info">' + esc(NO_BIZ_PRODUCTS) + "</p>") +
+      catalog("business").map((p) => { const v = (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(prodLabel(p)) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="—">'; }).join("") +
       "</div>" + (m.err ? '<div class="err">' + esc(m.err) + "</div>" : "") + '<div class="mact"><button class="btn primary" data-act="m-prices">שמירה</button><button class="btn" data-act="m-close">ביטול</button></div>';
   } else if (m.type === "form") h += renderOrderForm(m);
   return h + "</div></div>";
@@ -684,11 +694,12 @@ function renderOrderForm(m) {
   }
   h += "</div>";
   if (isNew) {
-    h += "<p>" + (m.kind === "business" ? "פריטים. המחיר ללקוח נשמר ונשאר עד שמשנים אותו." : "פריטים") + "</p>";
+    h += "<p>" + (m.kind === "business" ? "פריטים ממורנינג. המחיר ללקוח נשמר ונשאר עד שמשנים אותו." : "פריטים") + "</p>";
+    if (m.kind === "business" && !catalog("business").length) h += '<div class="msg bad">' + esc(NO_BIZ_PRODUCTS) + "</div>";
     m.rows.forEach((r, i) => {
       const p = D.productsById[r.p];
       const saved = m.kind === "business" && r.p ? (D.priceMap[v.client_id] || {})[r.p] : null;
-      h += '<div class="irow ' + (m.kind === "business" ? "" : "np") + '"><div class="field f-prod"><label for="r-p-' + i + '">מוצר</label><select id="r-p-' + i + '" data-row="' + i + '"><option value="">בחירה…</option>' + D.products.filter((x) => x.active).map((x) => '<option value="' + x.id + '" ' + (x.id === r.p ? "selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></div>" +
+      h += '<div class="irow ' + (m.kind === "business" ? "" : "np") + '"><div class="field f-prod"><label for="r-p-' + i + '">מוצר</label><select id="r-p-' + i + '" data-row="' + i + '"><option value="">בחירה…</option>' + catalog(m.kind).map((x) => '<option value="' + x.id + '" ' + (x.id === r.p ? "selected" : "") + ">" + esc(prodLabel(x)) + "</option>").join("") + "</select></div>" +
         '<div class="field"><label for="r-a-' + i + '">' + (p && p.unit === "unit" ? "יח׳" : "ק״ג") + '</label><input id="r-a-' + i + '" inputmode="decimal" dir="ltr" value="' + esc(r.a || "") + '"></div>' +
         (m.kind === "business" ? '<div class="field"><label for="r-c-' + i + '">₪ ל' + (p && p.unit === "unit" ? "יח׳" : "ק״ג") + '</label><input id="r-c-' + i + '" inputmode="decimal" dir="ltr" placeholder="' + (saved == null ? "אין שמור" : "") + '" value="' + esc(r.c != null && r.c !== "" ? r.c : saved ?? "") + '"></div>' : "") +
         '<button class="rm" data-act="m-rmrow:' + i + '" aria-label="הסרת שורה">×</button></div>';
@@ -874,6 +885,7 @@ document.addEventListener("click", (e) => {
     }
     case "morning-test": act(async () => { const r = await B.morning({ action: "test" }); toast(r.sandbox ? "החיבור למורנינג (סביבת ניסיון) תקין" : "החיבור למורנינג תקין"); }); break;
     case "morning-sync": act(async () => { const r = await B.morning({ action: "sync_clients" }); toast("סונכרנו " + r.total + " לקוחות (" + r.added + " חדשים)"); }); break;
+    case "morning-items": act(async () => { const r = await B.morning({ action: "sync_items" }); toast("סונכרנו " + r.total + " מוצרים (" + r.added + " חדשים" + (r.deactivated ? ", " + r.deactivated + " הוסרו" : "") + ")"); }); break;
     case "pick-client": syncForm(); ui.modal.values.client_id = b; ui.modal.values.client_q = ""; render(); break;
     case "client-clear": syncForm(); ui.modal.values.client_id = null; ui.focusId = "f-client-q"; render(); break;
     case "review-done": act(() => B.rpc("mark_email_handled", { p_id: b }), { okToast: "סומן כטופל" }); break;
@@ -884,6 +896,7 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "prod-toggle": { const p = D.productsById[b]; act(() => B.updateProduct(b, { active: !p.active })); break; }
+    case "prod-unit": act(() => B.updateProduct(b, { unit: c === "unit" ? "unit" : "kg" })); break;
     case "m-close": closeModal(); break;
     case "m-ok": { const run = modalRun; ui.modal = null; modalRun = null; render(); if (run) run(); break; }
     case "m-csv": runCSV(); break;

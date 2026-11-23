@@ -63,7 +63,9 @@ New → Packed → Fired (Business only). Deleted orders go to Trash for 30 days
 ### Product catalog
 
 - Each product has a name, a unit (kg / unit) and an active flag.
-- Built from products seen in orders (or a ClickEat export). Admin can edit it.
+- Two separate lists (owner's decision, 23/11/2026):
+  - **Private (website):** built from products seen in ClickEat orders. Admin can edit it.
+  - **Business:** the item list in morning (פריטים), synced from Settings, with SKU (מק״ט). Business orders, client prices and the WhatsApp assistant use only this list. morning has no unit, so admin marks each item kg or unit.
 
 ## Employee interface
 
