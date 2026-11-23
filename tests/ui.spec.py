@@ -105,6 +105,8 @@ with sync_playwright() as p:
     first_after = pg.locator(".stop:not(.start) b").first.inner_text()
     check(first_before != first_after, "automatic route reorders the stops")
     check("סיום: הרצל 10, ראשון לציון" in pg.inner_text(".stops"), "route ends at the custom address")
+    maps = [pg.locator(".route-head a[href*='google.com/maps/dir']").nth(k).get_attribute("href") for k in range(pg.locator(".route-head a[href*='google.com/maps/dir']").count())]
+    check(len(maps) >= 1 and "waypoints=" in maps[0] and maps[-1].endswith("") and "%D7%94%D7%A8%D7%A6%D7%9C" in maps[-1], "Google Maps button opens the whole route, ending at the custom address")
     pg.locator(".stop:not(.start)").nth(1).locator("[aria-label='למעלה']").click(); pg.wait_for_timeout(200)
     check(pg.locator(".stop:not(.start) b").first.inner_text() != first_after, "a stop can be moved up")
     pg.wait_for_timeout(1800)

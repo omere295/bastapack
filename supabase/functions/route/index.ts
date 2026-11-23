@@ -4,8 +4,9 @@
 // Starts at the shop address (settings). Ends back at the shop, at the last stop, or at a custom address
 // (settings: route_end = shop | last_stop | custom, route_end_address).
 // Uses Google Geocoding (results cached) and Google Routes (computeRoutes). Secret: GOOGLE_MAPS_API_KEY.
-// Up to 25 stops Google picks the order; above that the order comes from straight-line distances
-// (nearest neighbour + 2-opt) and Google still gives the drive times.
+// Up to 25 stops Google picks the order. Above that a rough order comes from straight-line distances
+// (nearest neighbour + 2-opt) and Google then orders each run of 25. "Last stop" mode tries the 3 furthest stops
+// as the end and keeps the quickest. Addresses Google only guessed at (other street/city, too far) count as not found.
 
 const KEY = Deno.env.get("GOOGLE_MAPS_API_KEY");
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
@@ -14,6 +15,8 @@ const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 class UserError extends Error {}
 type P = { lat: number; lng: number; formatted?: string };
+/** Straight-line km between two points. */
+function dist(a: P, b: P) { const x = (b.lng - a.lng) * Math.PI / 180 * Math.cos((a.lat + b.lat) * Math.PI / 360), y = (b.lat - a.lat) * Math.PI / 180; return 6371 * Math.hypot(x, y); }
 
 function roleOf(req: Request) {
   try {
@@ -29,14 +32,32 @@ async function db(path: string, init: RequestInit = {}) {
 }
 
 // ---------- Google ----------
+const SHOP_AREA = { lat: 32.0626, lng: 34.7761 };
+const MAX_KM = 45; // nothing we deliver to is further than this from the shop
+const loose = (t: string) => String(t || "").replace(/[-־"'״׳().,]/g, " ").replace(/\s+/g, " ").trim();
+/** A Google answer we can trust: in Israel, close enough, and, when Google only guessed (partial match),
+ *  the street and city it found are the ones we asked for. Wrong guesses are what made routes look odd. */
+function trusted(res: any, query: string) {
+  if (!res || res.geometry?.location_type === "APPROXIMATE") return false;
+  const c = (t: string) => (res.address_components || []).find((x: any) => x.types?.includes(t));
+  if (c("country")?.short_name && c("country").short_name !== "IL") return false;
+  const loc = res.geometry?.location; if (!loc || dist(SHOP_AREA, { lat: loc.lat, lng: loc.lng }) > MAX_KM) return false;
+  if (!res.partial_match) return true;
+  const [streetPart, cityPart] = query.split(",").map((x) => loose(x));
+  const route = loose(c("route")?.long_name || ""), city = loose(c("locality")?.long_name || "");
+  const words = (t: string) => t.split(" ").filter(Boolean).sort().join(" "); // "לסר אורי" = "אורי לסר"
+  const streetOk = !!route && words(route) === words(streetPart.replace(/\s*\d.*$/, ""));
+  const cityOk = !cityPart || !city || city.includes(cityPart) || cityPart.includes(city);
+  return streetOk && cityOk && !!c("street_number");
+}
 async function geocode(query: string): Promise<P | null> {
   const [hit] = await db("/rest/v1/geocode_cache?query=eq." + encodeURIComponent(query) + "&select=*");
   if (hit && (hit.ok || Date.now() - Date.parse(hit.updated_at) < 6 * 3600_000)) return hit.ok ? { lat: hit.lat, lng: hit.lng, formatted: hit.formatted } : null;
-  const r = await fetch("https://maps.googleapis.com/maps/api/geocode/json?region=il&language=he&address=" + encodeURIComponent(query) + "&key=" + KEY);
+  const r = await fetch("https://maps.googleapis.com/maps/api/geocode/json?region=il&language=he&components=country:IL&address=" + encodeURIComponent(query) + "&key=" + KEY);
   const d = await r.json();
   if (d.status === "REQUEST_DENIED" || d.status === "OVER_QUERY_LIMIT") throw new UserError("Google סירב לחיפוש כתובת: " + (d.error_message || d.status));
   const res = d.status === "OK" ? d.results[0] : null;
-  const ok = !!res && res.geometry?.location_type !== "APPROXIMATE";
+  const ok = trusted(res, query);
   const row = { query, ok, lat: res?.geometry?.location?.lat ?? null, lng: res?.geometry?.location?.lng ?? null, formatted: res?.formatted_address ?? null, updated_at: new Date().toISOString() };
   await db("/rest/v1/geocode_cache?on_conflict=query", { method: "POST", body: JSON.stringify(row), headers: { Prefer: "resolution=merge-duplicates" } });
   return ok ? { lat: row.lat, lng: row.lng, formatted: row.formatted } : null;
@@ -53,7 +74,8 @@ async function computeRoute(origin: P, destination: P, inter: P[], optimize: boo
   const d = await r.json();
   if (!r.ok || !d.routes?.length) throw new UserError("Google לא החזיר מסלול: " + (d.error?.message || r.status));
   const route = d.routes[0];
-  return { order: (route.optimizedIntermediateWaypointIndex || []).filter((i: number) => i >= 0) as number[], legs: (route.legs || []).map((l: any) => ({ seconds: secs(l.duration), meters: l.distanceMeters || 0 })) };
+  const legs = (route.legs || []).map((l: any) => ({ seconds: secs(l.duration), meters: l.distanceMeters || 0 }));
+  return { order: (route.optimizedIntermediateWaypointIndex || []).filter((i: number) => i >= 0) as number[], legs, total: legs.reduce((s: number, l: any) => s + l.seconds, 0) };
 }
 /** Drive times for a fixed order, in pieces of up to 25 stops. */
 async function legsFor(points: P[]) {
@@ -67,7 +89,6 @@ async function legsFor(points: P[]) {
 }
 
 // ---------- order without Google (more than 25 stops) ----------
-const dist = (a: P, b: P) => { const R = 6371, x = (b.lng - a.lng) * Math.PI / 180 * Math.cos((a.lat + b.lat) * Math.PI / 360), y = (b.lat - a.lat) * Math.PI / 180; return R * Math.hypot(x, y); };
 function heuristicOrder(start: P, stops: P[], end: P | null) {
   const left = stops.map((_, i) => i), tour: number[] = [];
   let cur = start;
@@ -115,11 +136,31 @@ async function build(day: string, wanted: string[] | null) {
     const r = await computeRoute(shop, endP, found.map((f) => f.p), true);
     seq = r.order.length === found.length ? r.order : found.map((_, i) => i); legs = r.order.length === found.length ? r.legs : [];
   } else if (endMode === "last_stop" && found.length <= 26) {
-    let far = 0; found.forEach((f, i) => { if (dist(shop, f.p) > dist(shop, found[far].p)) far = i; });
-    const rest = found.map((_, i) => i).filter((i) => i !== far);
-    const r = await computeRoute(shop, found[far].p, rest.map((i) => found[i].p), true);
-    seq = (r.order.length === rest.length ? r.order.map((k) => rest[k]) : rest).concat(far); legs = r.order.length === rest.length ? r.legs : [];
-  } else seq = heuristicOrder(shop, found.map((f) => f.p), endP);
+    // Google needs a fixed end point, so try the 3 stops furthest from the shop as the last stop and keep the quickest.
+    const cands = found.map((_, i) => i).sort((a, b) => dist(shop, found[b].p) - dist(shop, found[a].p)).slice(0, 3);
+    let best: { seq: number[]; legs: any[]; total: number } | null = null;
+    for (const far of cands) {
+      const rest = found.map((_, i) => i).filter((i) => i !== far);
+      const r = await computeRoute(shop, found[far].p, rest.map((i) => found[i].p), true);
+      if (r.order.length !== rest.length && rest.length > 1) continue;
+      const s2 = (rest.length > 1 ? r.order.map((k) => rest[k]) : rest).concat(far);
+      if (!best || r.total < best.total) best = { seq: s2, legs: r.legs, total: r.total };
+    }
+    seq = best ? best.seq : heuristicOrder(shop, found.map((f) => f.p), null); legs = best ? best.legs : [];
+  } else {
+    // More than 25 stops: a rough order first, then Google puts each run of up to 25 stops in the best driving order.
+    const rough = heuristicOrder(shop, found.map((f) => f.p), endP);
+    seq = [];
+    for (let i = 0; i < rough.length; i += 25) {
+      const chunk = rough.slice(i, i + 25);
+      const from = seq.length ? found[seq[seq.length - 1]].p : shop;
+      const next = rough[i + 25];
+      const to = next !== undefined ? found[next].p : endP;
+      if (!to || chunk.length < 2) { seq.push(...chunk); continue; }
+      const r = await computeRoute(from, to, chunk.map((k) => found[k].p), true);
+      seq.push(...(r.order.length === chunk.length ? r.order.map((k) => chunk[k]) : chunk));
+    }
+  }
   const path = [shop, ...seq.map((i) => found[i].p), ...(endP ? [endP] : [])];
   if (!legs.length && path.length > 1) legs = await legsFor(path);
   const row = {

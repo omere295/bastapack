@@ -421,6 +421,30 @@ function deliverStops(day) {
   const pos = new Map(r.stop_ids.map((id, i) => [id, i]));
   return stops.slice().sort((a, b) => (pos.get(a.id) ?? 1e6) - (pos.get(b.id) ?? 1e6) || String(a.number).localeCompare(String(b.number), "en", { numeric: true }));
 }
+/** Google Maps directions links for the stops in order. Google takes at most 9 stops between start and end,
+ *  so longer days are split into parts that follow on from each other. */
+const MAP_STOPS = 9;
+function mapLinks(day, stops, r, endMode) {
+  const shopTxt = setting("shop_address", "מקווה ישראל 22, תל אביב");
+  const where = (o) => {
+    const pt = r && r.points ? r.points[o.id] : null;
+    if (pt) return pt.lat + "," + pt.lng;
+    const a = o.kind === "business" ? (client(o.client_id) || {}).address : o.address;
+    return a && a.street ? [a.street + (a.building ? " " + a.building : ""), a.city || "תל אביב"].join(", ") : null;
+  };
+  const pts = [shopTxt, ...stops.map(where).filter(Boolean)];
+  if (endMode === "shop") pts.push(shopTxt);
+  else if (endMode === "custom" && ((r && r.end_label) || setting("route_end_address", ""))) pts.push((r && r.end_label) || setting("route_end_address", ""));
+  if (pts.length < 2) return [];
+  const links = [];
+  for (let i = 0; i < pts.length - 1; i += MAP_STOPS + 1) {
+    const part = pts.slice(i, i + MAP_STOPS + 2);
+    links.push("https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=" + encodeURIComponent(part[0]) +
+      "&destination=" + encodeURIComponent(part[part.length - 1]) +
+      (part.length > 2 ? "&waypoints=" + encodeURIComponent(part.slice(1, -1).join("|")) : ""));
+  }
+  return links;
+}
 const mins = (s) => Math.max(1, Math.round(s / 60));
 const hm = (s) => { const m = Math.round(s / 60); return m >= 60 ? Math.floor(m / 60) + " ש׳ " + (m % 60) + " דק׳" : m + " דק׳"; };
 
@@ -438,19 +462,26 @@ function renderDeliver() {
   const unpacked = stops.filter((o) => !isPacked(o)).length;
   const endMode = r ? r.end_mode : setting("route_end", "shop");
   const endLabel = endMode === "shop" ? "חזרה לחנות" : endMode === "custom" ? "סיום: " + ((r && r.end_label) || setting("route_end_address", "")) : null;
-  const legsOk = r && r.legs && r.legs.length && !fresh.length;
+  // Drive times only match while the stops are exactly the ones the route was made for.
+  const here = new Set(stops.map((o) => o.id));
+  const gone = r ? r.stop_ids.filter((id) => !here.has(id)).length : 0;
+  const placed = r ? r.stop_ids.length - (r.unfound || []).length : 0;
+  const legsOk = r && r.legs && r.legs.length && !fresh.length && !gone;
+  const maps = mapLinks(day, stops, r, endMode);
   h += '<div class="panel route-head"><div class="print-only"><img src="logo-white.png" alt="" class="print-logo"></div>' +
     '<h2 class="num">' + esc(dayLabel(day)) + " · " + stops.length + " עצירות" + (legsOk ? " · " + hm(r.total_seconds) + " נסיעה · " + fmt(r.total_meters / 1000, 1) + " ק״מ" : "") + "</h2>" +
-    '<div class="rowform no-print"><button class="btn small sea" data-act="route-opt:' + day + '" ' + (ui.routeBusy ? "disabled" : "") + ">" + (ui.routeBusy ? "מחשב מסלול…" : r ? "סידור מסלול מחדש" : "סידור מסלול אוטומטי") + '</button><button class="btn small" data-act="route-pdf" ' + (stops.length ? "" : "disabled") + ">ייצוא PDF</button></div>" +
+    '<div class="rowform no-print"><button class="btn small sea" data-act="route-opt:' + day + '" ' + (ui.routeBusy ? "disabled" : "") + ">" + (ui.routeBusy ? "מחשב מסלול…" : r ? "סידור מסלול מחדש" : "סידור מסלול אוטומטי") + '</button><button class="btn small" data-act="route-pdf" ' + (stops.length ? "" : "disabled") + ">ייצוא PDF</button>" +
+    maps.map((u, k) => '<a class="btn small" href="' + esc(u) + '" target="_blank" rel="noopener">' + (maps.length > 1 ? "מפה " + (k + 1) + "/" + maps.length : "פתיחה במפות Google") + "</a>").join("") + "</div>" +
+    (maps.length > 1 ? '<p class="stamp no-print">Google Maps מקבל עד ' + MAP_STOPS + " עצירות בכל פעם, לכן המסלול מחולק ל-" + maps.length + " חלקים. כל חלק מתחיל איפה שהקודם נגמר.</p>" : "") +
     (r ? '<p class="stamp no-print">' + (r.optimized ? "מסלול מהיר ביותר לפי Google" : "סדר ידני") + " · עודכן " + esc(new Intl.DateTimeFormat("he-IL", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(r.computed_at))) + "</p>" : '<p class="no-print">לחצו על "סידור מסלול אוטומטי" כדי לקבל את הסדר המהיר ביותר מהחנות.</p>') +
-    (fresh.length ? '<div class="msg info no-print">' + fresh.length + " הזמנות נוספו אחרי חישוב המסלול. לחצו \"סידור מסלול מחדש\".</div>" : "") +
+    (fresh.length || gone ? '<div class="msg info no-print">' + (fresh.length ? fresh.length + " הזמנות נוספו" : "") + (fresh.length && gone ? " ו-" : "") + (gone ? gone + " הזמנות הוסרו או שונו" : "") + " אחרי חישוב המסלול. לחצו \"סידור מסלול מחדש\".</div>" : "") +
     (unfound.size ? '<div class="msg bad">' + unfound.size + ' כתובות לא נמצאו במפה. תקנו אותן ב"פרטי הזמנה" ואז חשבו מחדש.</div>' : "") +
     (unpacked ? '<div class="msg bad num no-print">' + unpacked + " הזמנות עדיין לא ארוזות</div>" : '<div class="msg good no-print">כל ההזמנות ארוזות</div>') + "</div>";
   h += '<div class="stops"><div class="stop start"><span class="n">⌂</span><div><b>יציאה</b><div class="imeta">' + esc(setting("shop_address", "מקווה ישראל 22, תל אביב")) + "</div></div><span></span></div>";
   stops.forEach((o, i) => {
     const c = o.kind === "business" ? client(o.client_id) : null;
     const pt = r && r.points ? r.points[o.id] : null;
-    const leg = legsOk ? r.legs[i] : null;
+    const leg = legsOk && i < placed ? r.legs[i] : null;
     const nav = pt ? "https://waze.com/ul?ll=" + pt.lat + "," + pt.lng + "&navigate=yes" : "https://waze.com/ul?q=" + encodeURIComponent(fullAddr(c ? c.address : o.address)) + "&navigate=yes";
     const notes = items(o).filter((it) => it.note).length;
     h += '<div class="stop' + (unfound.has(o.id) ? " bad" : "") + '"><span class="n num">' + (i + 1) + '</span><div style="min-width:0">' +
