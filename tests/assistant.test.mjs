@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleMessage, normalizePhone, receive, systemPrompt } from "../supabase/functions/_shared/assistant.js";
+import { handleMessage, maybeSeveralOrders, normalizePhone, receive, splitOrders, systemPrompt } from "../supabase/functions/_shared/assistant.js";
 
 const OWNER = "+972500000001", STAFF = "+972500000002", STRANGER = "+972500000009";
 
@@ -172,6 +172,17 @@ test("receive() saves and filters; handleMessage then answers without saving aga
   assert.equal(await receive(w.deps, { id: "m2", phone: OWNER, text: "היי" }), false, "duplicate");
   const r = await handleMessage(w.deps, { id: "m2", phone: OWNER, text: "היי" }, { received: true });
   assert.equal(r, "היי");
+});
+
+test("several orders in one message are spotted and split; a single order is left alone", async () => {
+  const two = "למחר(שלישי): קנטינה\n10 קילו פילה דניס\n\nלמחר(שלישי): הרצל 16\n1 ארגז אמצי יפני";
+  assert.equal(maybeSeveralOrders(two), true);
+  assert.equal(maybeSeveralOrders("2 קילו סלמון לברוס למחר"), false);
+  assert.equal(maybeSeveralOrders("כן"), false);
+  const w = fakeWorld([() => ({ stop_reason: "end_turn", content: [{ type: "text", text: "הנה:\n" + JSON.stringify({ orders: ["למחר: קנטינה\n10 קילו דניס", "למחר: הרצל 16\n1 ארגז אמצי"] }) }] })]);
+  assert.deepEqual(await splitOrders(w.deps, two), ["למחר: קנטינה\n10 קילו דניס", "למחר: הרצל 16\n1 ארגז אמצי"]);
+  const bad = fakeWorld([say("לא JSON")]);
+  assert.deepEqual(await splitOrders(bad.deps, two), [two], "unclear answer keeps the message whole");
 });
 
 test("the prompt tells the AI today's date and the coming days", () => {

@@ -4,13 +4,14 @@
 //   POST from Meta → the signature is checked with WHATSAPP_APP_SECRET; each text message is saved, "typing…" is shown,
 //          and the database is asked (wa_enqueue, migration 0015) to call this function again for that message.
 //          Meta gets its 200 at once.
-//   POST with x-internal-key (from the database) → works out and sends the reply for one saved message, in the
-//          request itself. Background work after the reply to Meta was cut off after about a minute (23/11/2026),
-//          which left long messages unanswered; a request of its own may run up to 150 s.
+//   POST with x-internal-key (from the database) → answers the oldest waiting message of that person, in the request
+//          itself, then queues the next one (migration 0016). One person's messages are answered one at a time, in
+//          order; a message with several orders is first split into one message per order. Background work after the
+//          reply to Meta was cut off after about a minute (23/11/2026); a request of its own may run up to 150 s.
 // Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY,
 // optional GITHUB_TOKEN (app change requests become issues in omere295/bastapack), ASSISTANT_MODEL, WHATSAPP_API_VERSION.
 
-import { handleMessage, normalizePhone, receive } from "../_shared/assistant.js";
+import { handleMessage, maybeSeveralOrders, normalizePhone, receive, splitOrders } from "../_shared/assistant.js";
 
 const env = (k: string) => Deno.env.get(k) || "";
 const SB_URL = env("SUPABASE_URL"), SB_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
@@ -33,7 +34,16 @@ const store = {
   saveIncoming: async (m: { id: string; phone: string; body: string }) =>
     (await db("/rest/v1/wa_messages?on_conflict=id", { method: "POST", body: JSON.stringify({ id: m.id, phone: m.phone, direction: "in", body: m.body }), headers: { Prefer: "resolution=ignore-duplicates,return=representation" } })).length > 0,
   saveOutgoing: (phone: string, body: string) => db("/rest/v1/wa_messages", { method: "POST", body: JSON.stringify({ id: "out-" + crypto.randomUUID(), phone, direction: "out", body }) }),
-  history: async (phone: string, n: number) => (await db("/rest/v1/wa_messages?select=direction,body&phone=" + eq(phone) + "&created_at=gte." + new Date(Date.now() - 12 * 3600_000).toISOString() + "&order=created_at.desc&limit=" + n)).reverse(),
+  // The conversation so far: Emily's replies and the messages she already answered. Messages still waiting in the
+  // queue (and the one being answered, which handleMessage adds last) are left out, so nothing is answered twice.
+  // Messages are placed at the time Emily started answering them, so each reply follows its own message.
+  history: async (phone: string, n: number, opts?: { exclude?: string }) => {
+    const rows = await db("/rest/v1/wa_messages?select=direction,body,created_at,started_at&hidden=is.false&phone=" + eq(phone) +
+      "&or=(direction.eq.out,handled_at.not.is.null)" + (opts?.exclude ? "&id=neq." + encodeURIComponent(opts.exclude) : "") +
+      "&created_at=gte." + new Date(Date.now() - 12 * 3600_000).toISOString() + "&order=created_at.desc&limit=" + n);
+    const at = (r: any) => Date.parse(r.direction === "in" && r.started_at ? r.started_at : r.created_at);
+    return rows.sort((a: any, b: any) => at(a) - at(b));
+  },
   getPending: async (phone: string) => (await db("/rest/v1/wa_pending?select=*&phone=" + eq(phone)))[0] || null,
   setPending: (phone: string, p: any) => db("/rest/v1/wa_pending?on_conflict=phone", { method: "POST", body: JSON.stringify({ phone, ...p, created_at: new Date().toISOString() }), headers: { Prefer: "resolution=merge-duplicates" } }),
   clearPending: (phone: string) => db("/rest/v1/wa_pending?phone=" + eq(phone), { method: "DELETE" }),
@@ -132,23 +142,52 @@ async function intake(payload: any) {
   }
 }
 
-/** Answers one saved message. If a newer message from the same person is already waiting, that one answers both. */
+const rpc = (name: string, args: unknown) => db("/rest/v1/rpc/" + name, { method: "POST", body: JSON.stringify(args) });
+
+/** Answers the oldest waiting message of the person who sent message `id`, then queues the next one.
+ *  Only one request works for a person at a time (wa_claim); others return "busy" and the holder carries on. */
 async function answer(id: string) {
-  const [m] = await db("/rest/v1/wa_messages?select=id,phone,body,direction,created_at,handled_at&id=" + eq(id));
-  if (!m || m.direction !== "in" || m.handled_at) return "skip";
-  const done = () => db("/rest/v1/wa_messages?id=" + eq(id), { method: "PATCH", body: JSON.stringify({ handled_at: new Date().toISOString() }) });
-  const newer = await db("/rest/v1/wa_messages?select=id&direction=eq.in&phone=" + eq(m.phone) + "&created_at=gt." + encodeURIComponent(m.created_at) + "&limit=1");
-  if (newer.length) { await done(); return "newer"; }
-  const t0 = Date.now();
+  const [first] = await db("/rest/v1/wa_messages?select=phone&id=" + eq(id));
+  if (!first) return "skip";
+  const phone = first.phone;
+  if (!(await rpc("wa_claim", { p_phone: phone }))) return "busy";
+  let result = "idle";
   try {
-    await handleMessage(deps, { id: m.id, phone: m.phone, text: m.body }, { received: true });
-  } catch (e) {
-    console.error("assistant error", e);
-    await send(m.phone, "משהו השתבש אצלי (" + ((e as Error).message || "שגיאה") + "). נסו שוב בעוד רגע.");
+    const m = await rpc("wa_next", { p_phone: phone });
+    if (m) {
+      const done = () => db("/rest/v1/wa_messages?id=" + eq(m.id), { method: "PATCH", body: JSON.stringify({ handled_at: new Date().toISOString() }) });
+      const t0 = Date.now();
+      if (m.tries > 3) {
+        await done();
+        await send(phone, "לא הצלחתי לטפל בהודעה הזו גם אחרי כמה ניסיונות: \"" + String(m.body).slice(0, 60) + "…\". נסו לשלוח אותה שוב, אולי בחלקים.");
+        result = "gave up";
+      } else if (!String(m.id).includes("#") && maybeSeveralOrders(m.body) && (await splitOrders(deps, m.body).then(async (parts) => {
+        if (parts.length < 2) return false;
+        await rpc("wa_split", { p_id: m.id, p_parts: parts });
+        await send(phone, "קיבלתי " + parts.length + " הזמנות. מטפלת בהן אחת אחת, ואענה על כל אחת בנפרד.");
+        await store.saveOutgoing(phone, "קיבלתי " + parts.length + " הזמנות. מטפלת בהן אחת אחת.");
+        return true;
+      }).catch((e) => { console.error("split failed", e); return false; }))) {
+        result = "split";
+      } else {
+        try {
+          await handleMessage(deps, { id: String(m.id).split("#")[0], phone, text: m.body }, { received: true, current: m.id });
+        } catch (e) {
+          console.error("assistant error", e);
+          await send(phone, "משהו השתבש אצלי (" + ((e as Error).message || "שגיאה") + "). נסו שוב בעוד רגע.");
+        }
+        await done();
+        result = "ok";
+      }
+      console.log("whatsapp", result, m.id, Date.now() - t0, "ms");
+    }
+  } finally {
+    await rpc("wa_release", { p_phone: phone }).catch(() => {});
   }
-  await done();
-  console.log("answered", id, Date.now() - t0, "ms");
-  return "ok";
+  // anything still waiting for this person gets its own request
+  const waiting = await db("/rest/v1/wa_messages?select=id&direction=eq.in&hidden=is.false&handled_at=is.null&phone=" + eq(phone) + "&order=created_at&limit=1");
+  if (waiting.length) await rpc("wa_enqueue", { p_id: waiting[0].id }).catch((e) => console.error("enqueue failed", e));
+  return result;
 }
 
 Deno.serve(async (req) => {

@@ -169,12 +169,41 @@ export async function receive(deps, { id, phone, text }) {
   return true;
 }
 
+/** Could this message hold more than one order? (several blocks, or several "header:" lines). Cheap check, no AI. */
+export function maybeSeveralOrders(text) {
+  const t = String(text || "").trim();
+  if (t.length < 40) return false;
+  const blocks = t.split(/\n\s*\n/).filter((b) => b.trim()).length;
+  const headers = t.split("\n").filter((l) => /^[^:\n]{2,60}:/.test(l.trim())).length;
+  return blocks >= 2 || headers >= 2;
+}
+
+/** Splits a message into one text per order (AI, no tools). One order, or anything unclear, comes back as [text]. */
+export async function splitOrders(deps, text) {
+  const res = await deps.claude({
+    model: deps.model || "claude-sonnet-5-5", max_tokens: 4000,
+    system: `מפצלים הודעת וואטסאפ של חנות דגים להזמנות נפרדות: הזמנה אחת לכל לקוח (מסעדה) ולכל יום.
+מחזירים JSON בלבד, בלי שום טקסט אחר: {"orders": ["...", "..."]}
+- להעתיק את הטקסט של כל הזמנה כמו שהוא, מילה במילה, כולל הערות.
+- אם יום או תאריך כתוב פעם אחת ושייך לכמה הזמנות, להוסיף אותו בתחילת כל אחת מהן.
+- אם יש רק הזמנה אחת, או שזו לא הזמנה (שאלה, אישור, מחירים), להחזיר מערך עם ההודעה כולה.`,
+    messages: [{ role: "user", content: String(text) }],
+  });
+  const raw = (res.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+  try {
+    const parts = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)).orders;
+    if (Array.isArray(parts) && parts.length && parts.every((x) => typeof x === "string" && x.trim())) return parts.map((x) => x.trim());
+  } catch { /* fall through */ }
+  return [String(text)];
+}
+
 /** Longest Emily keeps working on one message before she says so (the server allows 150 s per request). */
 export const TIME_BUDGET_MS = 100_000;
 
 /** Handles one incoming text message. Returns the reply sent (or null when nothing was sent).
- *  With {received: true} the message was already checked and saved by receive(). */
-export async function handleMessage(deps, { id, phone, text }, { received = false } = {}) {
+ *  With {received: true} the message was already checked and saved by receive();
+ *  {current} is this message's row id, so the history can leave it out and add it last. */
+export async function handleMessage(deps, { id, phone, text }, { received = false, current = null } = {}) {
   const s = deps.store;
   phone = normalizePhone(phone);
   if (!received && !(await receive(deps, { id, phone, text }))) return null;
@@ -195,13 +224,17 @@ export async function handleMessage(deps, { id, phone, text }, { received = fals
   }
 
   const msgs = [];
-  for (const m of await s.history(phone, 16)) {
+  // the conversation so far (the store may leave out this message; it is added last below)
+  for (const m of await s.history(phone, 16, current ? { exclude: current } : undefined)) {
     const role = m.direction === "in" ? "user" : "assistant";
     if (msgs.length && msgs[msgs.length - 1].role === role) msgs[msgs.length - 1].content += "\n" + m.body;
     else msgs.push({ role, content: m.body });
   }
   while (msgs.length && msgs[0].role !== "user") msgs.shift();
-  if (!msgs.length || msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: text });
+  if (current) { // history left this message out: add it at the end
+    if (msgs.length && msgs[msgs.length - 1].role === "user") msgs[msgs.length - 1].content += "\n" + text;
+    else msgs.push({ role: "user", content: text });
+  } else if (!msgs.length || msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: text });
 
   let catalog = [];
   try { catalog = await s.findProducts(""); } catch { /* the AI can still search */ }
