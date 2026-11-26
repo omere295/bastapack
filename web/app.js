@@ -655,6 +655,10 @@ function renderSettings() {
   h += '<div class="panel"><h2>מורנינג</h2><p>לקוחות עסקיים ומוצרים עסקיים מגיעים ממורנינג. הסנכרון מוסיף חדשים ומעדכן קיימים. שמות העסקים שערכתם כאן נשמרים.</p>' +
     '<div class="rowform"><button class="btn small sea" data-act="morning-sync">סנכרון לקוחות ממורנינג</button><button class="btn small sea" data-act="morning-items">סנכרון מוצרים ממורנינג</button><button class="btn small" data-act="morning-test">בדיקת חיבור</button></div>' +
     '<p class="muted">הסנכרון רץ גם לבד: מוצרים כל שעה (05:00–20:00), לקוחות פעמיים ביום.' + syncStamp("morning_items_synced", "מוצרים") + syncStamp("morning_clients_synced", "לקוחות") + "</p></div>";
+  const mem = D.memory || [];
+  h += '<div class="panel" id="emily-memory"><h2>מה אמילי זוכרת</h2><p>דברים שלימדו את אמילי בוואטסאפ. היא פועלת לפיהם תמיד, עד שאומרים לה לשכוח או מסירים כאן.</p>' +
+    (mem.length ? '<div class="tscroll"><table class="t"><tbody>' + mem.map((m) => "<tr><td>" + esc(m.fact) + (m.clients?.business_name ? ' <span class="chip">' + esc(m.clients.business_name) + "</span>" : "") + '</td><td class="num muted">' + esc(String(m.created_at || "").slice(0, 10).split("-").reverse().join("/")) + '</td><td><button class="linkbtn danger" data-act="mem-del:' + m.id + '">הסרה</button></td></tr>').join("") + "</tbody></table></div>"
+      : '<p class="muted">עוד לא לימדו אותה כלום. כותבים לה למשל: "תזכרי ש…".</p>') + "</div>";
   h += '<div class="panel"><h2>לקוחות עסקיים</h2><p>אפשר גם להוסיף לקוח ידנית. כדי להפיק לו תעודות משלוח הוא צריך להיות קיים גם במורנינג.</p>' +
     '<div class="rowform"><div class="field"><label for="cl-b">שם העסק</label><input id="cl-b"></div><div class="field"><label for="cl-c">איש קשר</label><input id="cl-c"></div><div class="field"><label for="cl-p">טלפון</label><input id="cl-p" dir="ltr"></div></div>' +
     '<div class="rowform"><div class="field"><label for="cl-l">שם החברה</label><input id="cl-l"></div><div class="field"><label for="cl-h">ח.פ.</label><input id="cl-h" dir="ltr"></div><div class="field"><label for="cl-city">עיר</label><input id="cl-city"></div><div class="field"><label for="cl-st">רחוב ומספר</label><input id="cl-st"></div><button class="btn small sea" data-act="client-add">הוספה</button></div>';
@@ -662,7 +666,7 @@ function renderSettings() {
   h += '<div class="field"><label for="cl-search">חיפוש לקוח (' + D.clients.length.toLocaleString("he-IL") + ' לקוחות)</label><input id="cl-search" data-search="clients" value="' + esc(ui.clientQ || "") + '" placeholder="שם, ח.פ. או טלפון" autocomplete="off"></div>' +
     (!ui.clientQ ? '<p class="muted">' + (shown.length ? "מוצגים לקוחות שיש להם מחירון. חפשו כדי למצוא אחרים." : "חפשו לקוח כדי לראות או לערוך את המחירון שלו.") + "</p>" : !shown.length ? '<p class="muted">לא נמצא לקוח</p>' : "");
   if (shown.length) h += '<div class="tscroll"><table class="t"><thead><tr><th>עסק</th><th>איש קשר</th><th>טלפון</th><th>כתובת</th><th>מחירים</th></tr></thead><tbody>' +
-    shown.map((c) => "<tr><td>" + esc(c.business_name) + "</td><td>" + esc(c.contact_name || "") + '</td><td class="num" dir="ltr">' + esc(c.phone || "") + "</td><td>" + esc(fullAddr(c.address)) + '</td><td><button class="btn small" data-act="prices:' + c.id + '">מחירון (' + Object.keys(D.priceMap[c.id] || {}).length + ")</button></td></tr>").join("") + "</tbody></table></div>";
+    shown.map((c) => "<tr><td>" + esc(c.business_name) + "</td><td>" + esc(c.contact_name || "") + '</td><td class="num" dir="ltr">' + esc(c.phone || "") + "</td><td>" + esc(fullAddr(c.address)) + '</td><td><button class="btn small" data-act="prices:' + c.id + '">מחירון: ' + (c.price_mode === "regular" ? "רגיל" : c.price_mode === "special" ? "מיוחד (" + Object.keys(D.priceMap[c.id] || {}).length + ")" : "לא נקבע") + "</button></td></tr>").join("") + "</tbody></table></div>";
   h += "</div>";
   // products
   const biz = prods.filter((p) => p.catalog === "business");
@@ -722,7 +726,11 @@ function renderModal() {
       '<div class="mact"><button class="btn sea" data-act="m-fire" ' + (isPacked(o) && !bt.missing.length && c.morning_id && !ui.busy ? "" : "disabled") + ">" + (ui.busy ? "מפיק…" : "הפקת תעודת משלוח") + '</button><button class="btn" data-act="m-close">ביטול</button></div>';
   } else if (m.type === "prices") {
     const c = client(m.cid);
-    h += '<h3 id="m-title">מחירון · ' + esc(c.business_name) + '</h3><p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p><div class="pricegrid">' +
+    const mode = m.mode !== undefined ? m.mode : c.price_mode || null;
+    h += '<h3 id="m-title">מחירון · ' + esc(c.business_name) + '</h3>' +
+      '<div class="seg small" role="group" aria-label="סוג מחירון"><button data-act="pmode:regular" aria-pressed="' + (mode === "regular") + '">מחירים רגילים</button><button data-act="pmode:special" aria-pressed="' + (mode === "special") + '">מחירים מיוחדים</button><button data-act="pmode:" aria-pressed="' + (!mode) + '">לא נקבע</button></div>' +
+      '<p class="muted">' + (mode === "regular" ? "הלקוח משלם תמיד את המחיר הרגיל ממורנינג. מחיר שתכתבו כאן גובר עליו." : mode === "special" ? "ללקוח מחירים משלו. אמילי תשאל על כל מוצר שאין לו מחיר כאן." : "אמילי תשאל בפעם הבאה: \"יש לו מחירים מיוחדים?\"") + '</p>' +
+      '<p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p><div class="pricegrid">' +
       (catalog("business").length ? "" : '<p class="msg info">' + esc(NO_BIZ_PRODUCTS) + "</p>") +
       catalog("business").map((p) => { const v = (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(prodLabel(p)) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="' + (p.list_price != null ? "רגיל " + esc(String(Number(p.list_price))) : "—") + '">'; }).join("") +
       "</div>" + (m.err ? '<div class="err">' + esc(m.err) + "</div>" : "") + '<div class="mact"><button class="btn primary" data-act="m-prices">שמירה</button><button class="btn" data-act="m-close">ביטול</button></div>';
@@ -966,6 +974,8 @@ document.addEventListener("click", (e) => {
     case "prod-toggle": { const p = D.productsById[b]; act(() => B.updateProduct(b, { active: !p.active })); break; }
     case "prod-unit": act(() => B.updateProduct(b, { unit: c === "unit" ? "unit" : "kg" })); break;
     case "m-close": closeModal(); break;
+    case "pmode": ui.modal.mode = b || null; render(); break;
+    case "mem-del": act(() => B.forgetMemory(b), { okToast: "הוסר מהזיכרון של אמילי" }); break;
     case "m-ok": { const run = modalRun; ui.modal = null; modalRun = null; render(); if (run) run(); break; }
     case "m-csv": runCSV(); break;
     case "m-copy": { const ta = document.getElementById("csvtext"); try { navigator.clipboard.writeText(ta.value).then(() => toast("הועתק"), () => { ta.select(); toast("סמנו והעתיקו ידנית"); }); } catch { ta.select(); } break; }
@@ -976,8 +986,9 @@ document.addEventListener("click", (e) => {
         const n = toNum(raw); if (n == null || n <= 0) { m.err = "מחיר לא תקין: " + D.productsById[el.dataset.cprice].name; render(); return; }
         if ((D.priceMap[m.cid] || {})[el.dataset.cprice] !== n) rows.push({ client_id: m.cid, product_id: el.dataset.cprice, price: n, updated_by: "admin" });
       }
+      const modeChanged = m.mode !== undefined && m.mode !== (client(m.cid).price_mode || null);
       ui.modal = null;
-      if (rows.length) act(() => B.upsertClientPrices(rows), { okToast: "המחירון נשמר" }); else render();
+      if (rows.length || modeChanged) act(async () => { if (modeChanged) await B.updateClient(m.cid, { price_mode: m.mode }); if (rows.length) await B.upsertClientPrices(rows); }, { okToast: "המחירון נשמר" }); else render();
       break;
     }
     case "m-save": saveForm(); break;

@@ -4,7 +4,8 @@
 // deps = {
 //   store: { isAllowed(phone), isOwner(phone), saveIncoming(msg) → bool (false = already handled),
 //            saveOutgoing(phone, text), history(phone, n), getPending(phone), setPending(phone, p), clearPending(phone),
-//            findClients(q), findProducts(q), clientPrices(clientId), listOrders(filter), getOrder(number),
+//            findClients(q), getClient(id) → {id, name, price_mode}, findProducts(q), clientPrices(clientId), listOrders(filter), getOrder(number),
+//            memory() → [{id, fact, client}], remember({fact, client_id, phone}) → id, forget(id) → bool,
 //            rpc(name, args), addAllowed(phone, name), removeAllowed(phone), createIssue(title, body) },
 //   claude(body) → Anthropic Messages API response,
 //   send(phone, text),
@@ -21,7 +22,7 @@ const YES = /^(yes|y|ok|כן|אישור|מאשר|מאשרת|בטח|יאללה)$/
 const NO = /^(no|n|לא|ביטול|בטל|עזוב)$/i;
 const clean = (t) => String(t || "").trim().replace(/[.!?,\s]+$/g, "").replace(/^\s+/, "");
 
-export function systemPrompt(today, catalog = []) {
+export function systemPrompt(today, catalog = [], memory = []) {
   const d = new Date(today + "T12:00:00Z");
   const lines = [];
   for (let i = 0; i < 8; i++) { const x = new Date(d); x.setUTCDate(d.getUTCDate() + i); lines.push(DAYS[x.getUTCDay()] + " " + x.toISOString().slice(0, 10)); }
@@ -37,7 +38,10 @@ export function systemPrompt(today, catalog = []) {
 - אם לא נאמר יום, תמיד לשאול לאיזה יום. לא לנחש.
 - לקוח: לחפש עם find_clients. אם יש כמה התאמות או אף אחת, לשאול ("לא מצאתי את ברוס במורנינג, אולי ברוס בורגר בע״מ?"). כשמתברר כינוי חדש ללקוח, לשמור אותו עם add_alias.
 - מוצרים: רק מהקטלוג העסקי (הפריטים במורנינג). אפשר לזהות מוצר גם לפי מק״ט. אם מוצר לא קיים בקטלוג, לא להמציא: להציע את הקרובים או לבקש להוסיף אותו במורנינג ולסנכרן. כמות בק״ג למוצרי משקל, ביחידות למוצרי יחידה. מוצר במשקל שהוזמן ביחידות ("2 יח׳ פילה סלמון"): amount = מספר היחידות עם pieces=true, ושוקלים באריזה. הוראות לפריט ("לפלט", "להביא ראש ואידרה") נכנסות ל-note של אותו פריט.
-- מחירים: לפני מע״מ, לק״ג או ליחידה. לכל לקוח המחיר שלו אם שמור (get_client_prices), ואם לא, המחיר הרגיל של המוצר מהקטלוג (₪ בקטלוג). לא לשאול על מחיר כשיש מחיר רגיל. רק אם אין גם מחיר רגיל, create_order יחזיר אילו מחירים חסרים: לשאול ולשמור עם set_price, ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices. כשמאשרים הזמנה, לציין ליד כל פריט אם המחיר הוא של הלקוח או הרגיל.
+- מחירים: לפני מע״מ, לק״ג או ליחידה. לכל לקוח עסקי יש סוג מחירון (price_mode ב-find_clients): regular = תמיד המחיר הרגיל של המוצר מהקטלוג (₪ בקטלוג). special = המחירים המיוחדים שלו (get_client_prices). ריק = עוד לא שאלו.
+- בפעם הראשונה שעולה לקוח שסוג המחירון שלו ריק, לשאול: "יש לו מחירים מיוחדים?". אם לא: set_price_mode עם regular. אם כן: set_price_mode עם special, לבקש את המחירים ולשמור כל אחד עם set_price. מה שנשמר נשאר עד ששינו אותו.
+- ללקוח special, מוצר בלי מחיר שמור: create_order יחזיר אותו. לשאול מה המחיר שלו (ולהציע את הרגיל), לשמור עם set_price ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices. כשמאשרים הזמנה, לציין ליד כל פריט את המחיר ואם הוא מיוחד או רגיל.
+- זיכרון קבוע: כשמלמדים אותך משהו שצריך לזכור תמיד (כלל עבודה, העדפה או פרט קבוע על לקוח), לשמור עם remember ולכתוב "אזכור: …". כשמבקשים לשנות או לשכוח משהו שזכרת, forget לישן ו-remember לחדש אם צריך. מחירים, כינויים וסוג מחירון נשמרים בכלים שלהם ולא בזיכרון. הוראה להזמנה אחת לא לזכור.
 - אחרי יצירה או עדכון: לאשר במלואו: מספר הזמנה, לקוח, יום ותאריך, פריטים וכמויות, משלוח או איסוף.
 - פעולות שדורשות אישור (ביטול הזמנה, שינוי מחיר קיים, הוספה/הסרה של מספר מורשה, שינוי באפליקציה): הכלי שומר אותן וממתין. לכתוב בדיוק מה יקרה ולבקש להשיב "כן" לאישור. אל תכתבי שהפעולה בוצעה לפני האישור.
 - הפקה במורנינג (FIRE) ושינוי סיסמאות נעשים באפליקציה בלבד.
@@ -46,7 +50,8 @@ export function systemPrompt(today, catalog = []) {
 - כשצריך כמה חיפושים או פעולות שלא תלויים זה בזה (למשל כמה לקוחות או כמה הזמנות בהודעה אחת), להפעיל את כל הכלים באותו תור, ביחד.
 - תשובות קצרות, בעברית, בסגנון וואטסאפ. אפשר *הדגשה*. בלי טבלאות.` +
     (catalog.length ? "\n\nקטלוג המוצרים העסקיים (id · שם · יחידה · מק״ט · מחיר רגיל לפני מע״מ). להשתמש ב-id מכאן ישירות, בלי find_products:\n" + catalog.map((p) => p.id + " · " + p.name + " · " + (p.unit === "unit" ? "יחידה" : "ק״ג") + (p.sku ? " · " + p.sku : "") + (p.list_price != null ? " · ₪" + Number(p.list_price) : "")).join("\n")
-      : "\n\nהקטלוג העסקי עדיין ריק: אי אפשר ליצור הזמנות עד שמנהל לוחץ באפליקציה על הגדרות → \"סנכרון מוצרים ממורנינג\". להסביר את זה אם מבקשים הזמנה.");
+      : "\n\nהקטלוג העסקי עדיין ריק: אי אפשר ליצור הזמנות עד שמנהל לוחץ באפליקציה על הגדרות → \"סנכרון מוצרים ממורנינג\". להסביר את זה אם מבקשים הזמנה.") +
+    (memory.length ? "\n\nדברים שלימדו אותך (לפעול לפיהם תמיד, אלא אם ביקשו עכשיו אחרת). [id] בשביל forget:\n" + memory.map((m) => "[" + m.id + "] " + (m.client ? "(" + m.client + ") " : "") + m.fact).join("\n") : "");
 }
 
 export const TOOLS = [
@@ -64,6 +69,9 @@ export const TOOLS = [
     items: { type: "array", items: { type: "object", properties: { product_id: { type: "string" }, amount: { type: "number" }, pieces: { type: "boolean", description: "true כשמוצר במשקל הוזמן ביחידות (\"2 יח׳ פילה סלמון\"): amount הוא מספר היחידות, ושוקלים באריזה" }, note: { type: "string", description: "הערה לפריט, למשל \"לפלט, להביא ראש ואידרה\"" } }, required: ["product_id", "amount"] } } }, required: ["number"] } },
   { name: "cancel_order", description: "מבקש לבטל הזמנה. דורש אישור \"כן\" מהשולח.", input_schema: { type: "object", properties: { number: { type: "string" } }, required: ["number"] } },
   { name: "set_price", description: "שומר מחיר ללקוח למוצר. מחיר חדש נשמר מיד; שינוי מחיר קיים דורש אישור \"כן\".", input_schema: { type: "object", properties: { client_id: { type: "string" }, product_id: { type: "string" }, price: { type: "number" } }, required: ["client_id", "product_id", "price"] } },
+  { name: "set_price_mode", description: "קובע את סוג המחירון של לקוח: regular (תמיד המחיר הרגיל מהקטלוג) או special (מחירים מיוחדים שנשמרים עם set_price).", input_schema: { type: "object", properties: { client_id: { type: "string" }, mode: { type: "string", enum: ["regular", "special"] } }, required: ["client_id", "mode"] } },
+  { name: "remember", description: "שומר לתמיד משהו שלימדו אותך (כלל, העדפה, פרט קבוע על לקוח). client_id אם זה על לקוח מסוים.", input_schema: { type: "object", properties: { fact: { type: "string" }, client_id: { type: "string" } }, required: ["fact"] } },
+  { name: "forget", description: "מוחק משהו מהזיכרון הקבוע לפי ה-id שלו (מהרשימה \"דברים שלימדו אותך\").", input_schema: { type: "object", properties: { memory_id: { type: "string" } }, required: ["memory_id"] } },
   { name: "add_alias", description: "שומר כינוי ללקוח (למשל \"ברוס\") כדי לזהות אותו בהמשך.", input_schema: { type: "object", properties: { client_id: { type: "string" }, alias: { type: "string" } }, required: ["client_id", "alias"] } },
   { name: "manage_allowed_number", description: "מוסיף או מסיר מספר שמורשה לדבר עם העוזר. רק הבעלים. דורש אישור \"כן\".", input_schema: { type: "object", properties: { action: { type: "string", enum: ["add", "remove"] }, phone: { type: "string", description: "למשל 0521234567 או +972521234567" }, name: { type: "string" } }, required: ["action", "phone"] } },
   { name: "request_app_change", description: "בקשה לשנות או לתקן משהו באפליקציה. דורש אישור \"כן\".", input_schema: { type: "object", properties: { title: { type: "string" }, details: { type: "string" } }, required: ["title", "details"] } },
@@ -90,14 +98,20 @@ async function runTool(deps, phone, name, input) {
     case "create_order": {
       if (!isDate(input.delivery_date)) return { error: "חסר תאריך תקין" };
       if (!input.allow_missing_prices) {
-        // a price is missing only when the client has none saved and the item has no regular price either
+        const client = await s.getClient(input.client_id);
+        if (!client) return { error: "לקוח לא נמצא" };
         const prices = await s.clientPrices(input.client_id);
+        if (!client.price_mode && !prices.length)
+          return { error: "ask_price_mode", question: "יש ל" + client.name + " מחירים מיוחדים?", hint: "לשאול. לא → set_price_mode regular. כן → set_price_mode special, לבקש מחירים ולשמור עם set_price. ואז ליצור." };
+        // regular: the client's saved price if any, else the item's regular price. special: only the client's own prices.
         const catalog = await s.findProducts("");
-        const have = new Set([...prices.map((p) => p.product_id), ...catalog.filter((p) => p.list_price != null).map((p) => p.id)]);
+        const have = new Set(prices.map((p) => p.product_id));
+        if (client.price_mode === "regular") for (const p of catalog) if (p.list_price != null) have.add(p.id);
         const missing = (input.items || []).filter((i) => !have.has(i.product_id)).map((i) => i.product_id);
         if (missing.length) {
-          const names = catalog.filter((p) => missing.includes(p.id)).map((p) => p.name);
-          return { error: "missing_prices", missing_products: names.length ? names : missing, hint: "לשאול את המחיר, לשמור עם set_price, ואז ליצור שוב" };
+          const named = catalog.filter((p) => missing.includes(p.id)).map((p) => ({ name: p.name, regular_price: p.list_price != null ? Number(p.list_price) : null }));
+          return { error: "missing_prices", missing_products: named.length ? named : missing,
+            hint: client.price_mode === "regular" ? "אין מחיר רגיל במורנינג: לשאול את המחיר ולשמור עם set_price" : "ללקוח מחירים מיוחדים: לשאול את המחיר שלו (להציע את הרגיל), לשמור עם set_price, ואז ליצור שוב" };
         }
       }
       return await s.rpc("wa_create_order", { p_client: input.client_id, p_date: input.delivery_date, p_pickup: !!input.pickup, p_items: input.items || [], p_note: input.note || null });
@@ -126,6 +140,17 @@ async function runTool(deps, phone, name, input) {
       await s.setPending(phone, { action: "set_price", args: { client_id: input.client_id, product_id: input.product_id, price }, summary });
       return { needs_confirmation: true, summary, old_price: Number(current.price), new_price: price };
     }
+    case "set_price_mode": {
+      if (!["regular", "special"].includes(input.mode)) return { error: "סוג מחירון לא תקין" };
+      await s.rpc("wa_set_price_mode", { p_client: input.client_id, p_mode: input.mode });
+      return { saved: true, mode: input.mode };
+    }
+    case "remember": {
+      const fact = String(input.fact || "").trim();
+      if (!fact) return { error: "אין מה לזכור" };
+      return { saved: true, id: await s.remember({ fact: fact.slice(0, 500), client_id: input.client_id || null, phone }) };
+    }
+    case "forget": return (await s.forget(String(input.memory_id || ""))) ? { forgotten: true } : { error: "לא מצאתי את זה בזיכרון" };
     case "add_alias": await s.rpc("wa_add_alias", { p_client: input.client_id, p_alias: String(input.alias || "") }); return { saved: true };
     case "manage_allowed_number": {
       if (!(await s.isOwner(phone))) return { error: "רק הבעלים יכול לשנות את רשימת המספרים" };
@@ -238,10 +263,11 @@ export async function handleMessage(deps, { id, phone, text }, { received = fals
     else msgs.push({ role: "user", content: text });
   } else if (!msgs.length || msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: text });
 
-  let catalog = [];
+  let catalog = [], memory = [];
   try { catalog = await s.findProducts(""); } catch { /* the AI can still search */ }
+  try { memory = s.memory ? await s.memory() : []; } catch { /* answer without it rather than not at all */ }
   // The fixed part (tools + rules + catalog) is cached by the API, so each turn starts faster and costs less.
-  const system = [{ type: "text", text: systemPrompt(deps.today(), catalog), cache_control: { type: "ephemeral" } }];
+  const system = [{ type: "text", text: systemPrompt(deps.today(), catalog, memory), cache_control: { type: "ephemeral" } }];
   for (let turn = 0; turn < 8; turn++) {
     if ((deps.now || Date.now)() - started > (deps.budgetMs ?? TIME_BUDGET_MS))
       return reply("זה לוקח לי יותר מדי זמן, אז עצרתי באמצע. כדאי לפצל את ההודעה (למשל הזמנה אחת בכל הודעה) ולשלוח שוב. מה שכבר אישרתי נשמר.");

@@ -82,7 +82,7 @@ export class SupabaseBackend {
   async loadAll(sinceDate) {
     const admin = this.role === "admin";
     const q = (t, s) => this._req("/rest/v1/" + t + s);
-    const [orders, products, clients, holidays, settings, prices, review] = await Promise.all([
+    const [orders, products, clients, holidays, settings, prices, review, memory] = await Promise.all([
       q("orders", "?select=*,order_items(*)&or=(delivery_date.gte." + sinceDate + ",status.eq.new)&order=delivery_date,number"),
       q("products", "?select=*&order=name"),
       this._all("/rest/v1/clients?select=*&order=business_name"),
@@ -90,8 +90,9 @@ export class SupabaseBackend {
       q("settings", "?select=*"),
       admin ? q("client_prices", "?select=*") : Promise.resolve([]),
       admin ? q("email_inbox", "?select=id,gmail_id,received_at,subject,problem,parsed&status=eq.review&order=received_at.desc") : Promise.resolve([]),
+      admin ? q("assistant_memory", "?select=id,fact,client_id,taught_by,created_at,clients(business_name)&deleted_at=is.null&order=created_at") : Promise.resolve([]),
     ]);
-    return { orders, products, clients, holidays, settings, prices, review };
+    return { orders, products, clients, holidays, settings, prices, review, memory };
   }
 
   /** Reads every row of a list, 1000 at a time (the server returns at most 1000 per request). */
@@ -153,6 +154,7 @@ export class SupabaseBackend {
     return this._req("/rest/v1/client_prices?on_conflict=client_id,product_id", { method: "POST", body: rows, prefer: "resolution=merge-duplicates" });
   }
   addClient(row) { return this._req("/rest/v1/clients", { method: "POST", body: row, prefer: "return=representation" }); }
+  forgetMemory(id) { return this._req("/rest/v1/assistant_memory?id=eq." + id, { method: "PATCH", body: { deleted_at: new Date().toISOString() } }); }
   updateClient(id, patch) { return this._req("/rest/v1/clients?id=eq." + id, { method: "PATCH", body: patch }); }
   addProduct(row) { return this._req("/rest/v1/products", { method: "POST", body: row }); }
   updateProduct(id, patch) { return this._req("/rest/v1/products?id=eq." + id, { method: "PATCH", body: patch }); }

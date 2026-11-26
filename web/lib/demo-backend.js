@@ -30,7 +30,7 @@ export function demoSeed(today = todayIL()) {
     { id: "c1", business_name: "מסעדת הנמל", contact_name: "יוסי אלון", legal_name: "הנמל הצפוני בע״מ", company_number: "515234871", phone: "052-7781203", address: { city: "תל אביב-יפו", street: "נמל תל אביב, האנגר", building: "12" }, aliases: ["הנמל"] },
     { id: "c2", business_name: "ביסטרו אלנבי", contact_name: "מאיה רז", legal_name: "א.ר. ביסטרו בע״מ", company_number: "516098432", phone: "054-3320918", address: { city: "תל אביב-יפו", street: "אלנבי", building: "64" }, aliases: [] },
     { id: "c3", business_name: "סושי צפון", contact_name: "אורי קדמי", legal_name: "צפון אוכל יפני בע״מ", company_number: "514877610", phone: "050-9912447", address: { city: "רמת גן", street: "ז׳בוטינסקי", building: "21" }, aliases: [] },
-  ].map((c) => ({ morning_id: "demo-" + c.id, active: true, ...c }));
+  ].map((c) => ({ morning_id: "demo-" + c.id, active: true, price_mode: "special", ...c }));
   const orders = [];
   const items = (oid, list) => list.map(([name, count, price, kg, option, note], i) => {
     const p = P(name);
@@ -81,7 +81,8 @@ export function demoSeed(today = todayIL()) {
     parsed: { number: "993", delivery_date: D1, time_window: "09:00-16:00", pickup: false, customer_name: "רון כץ", phone: "0521112233",
       address: { city: "תל אביב-יפו", street: "בן יהודה", building: "120" }, delivery_fee: 30, total: 342,
       items: [{ name: "פילה סלמון נורווגי לפי משקל", count: 2, price: 155, kg: 1, note: "", option: "" }, { name: "פילה לברק טרי", count: 1, price: 52, kg: 0.22, note: "", option: "" }] } }];
-  return { review, orders, products: clone([...PRODUCTS, ...BIZ_PRODUCTS]), clients, prices, holidays: [], settings: [{ key: "route_end", value: "shop" }, { key: "shop_address", value: "מקווה ישראל 22, תל אביב" }], log: [], seq: { b: 1004, m: 501 } };
+  const memory = [{ id: "mem-1", fact: "למסעדת הנמל תמיד לנקות ולפלט את הדג", client_id: "c1", taught_by: "+972500000001", created_at: "2026-11-20T09:00:00Z", deleted_at: null }];
+  return { memory, review, orders, products: clone([...PRODUCTS, ...BIZ_PRODUCTS]), clients, prices, holidays: [], settings: [{ key: "route_end", value: "shop" }, { key: "shop_address", value: "מקווה ישראל 22, תל אביב" }], log: [], seq: { b: 1004, m: 501 } };
 }
 
 export class DemoBackend {
@@ -104,6 +105,7 @@ export class DemoBackend {
       products: this.db.products, clients: this.db.clients, holidays: this.db.holidays, settings: this.db.settings,
       prices: admin ? this.db.prices : [],
       review: admin ? this.db.review.filter((r) => r.status === "review") : [],
+      memory: admin ? this.db.memory.filter((m) => !m.deleted_at).map((m) => ({ ...m, clients: m.client_id ? { business_name: this.db.clients.find((c) => c.id === m.client_id)?.business_name } : null })) : [],
     });
   }
   async loadHistory(kind, from, to) {
@@ -249,8 +251,14 @@ export class DemoBackend {
   }
   _setPrice(client_id, product_id, price) {
     const ex = this.db.prices.find((x) => x.client_id === client_id && x.product_id === product_id);
-    if (ex) ex.price = price; else this.db.prices.push({ client_id, product_id, price });
+    if (ex) ex.price = price; else {
+      this.db.prices.push({ client_id, product_id, price });
+      const c = this.db.clients.find((x) => x.id === client_id);
+      if (c && !c.price_mode) c.price_mode = "special"; // same as the client_prices_mark_special trigger (0018)
+    }
   }
+  /** Removes one thing Emily was taught (soft, like the real table). */
+  async forgetMemory(id) { this._admin(); const m = this.db.memory.find((x) => x.id === id); if (m) m.deleted_at = new Date().toISOString(); }
   async upsertClientPrices(rows) { this._admin(); rows.forEach((r) => this._setPrice(r.client_id, r.product_id, r.price)); }
   async addClient(row) { this._admin(); const c = { id: "c-" + uid(), aliases: [], active: true, address: {}, ...row }; this.db.clients.push(c); return [c]; }
   async updateClient(id, patch) { this._admin(); Object.assign(this.db.clients.find((c) => c.id === id), patch); }

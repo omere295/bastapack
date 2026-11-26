@@ -50,9 +50,20 @@ const store = {
   findClients: async (q: string) => {
     if (!q.trim()) return [];
     const L = like(q), alias = encodeURIComponent('{"' + q.replace(/["\\{}]/g, "").trim() + '"}');
-    const rows = await db("/rest/v1/clients?select=id,business_name,legal_name,company_number,phone,aliases,address&active=is.true&limit=8&or=(business_name.ilike." + L + ",legal_name.ilike." + L + ",company_number.ilike." + L + ",phone.ilike." + L + ",aliases.cs." + alias + ")");
-    return rows.map((c: any) => ({ id: c.id, name: c.business_name, legal_name: c.legal_name, company_number: c.company_number, aliases: c.aliases, city: c.address?.city || null }));
+    const rows = await db("/rest/v1/clients?select=id,business_name,legal_name,company_number,phone,aliases,address,price_mode&active=is.true&limit=8&or=(business_name.ilike." + L + ",legal_name.ilike." + L + ",company_number.ilike." + L + ",phone.ilike." + L + ",aliases.cs." + alias + ")");
+    return rows.map((c: any) => ({ id: c.id, name: c.business_name, legal_name: c.legal_name, company_number: c.company_number, aliases: c.aliases, city: c.address?.city || null, price_mode: c.price_mode || null }));
   },
+  getClient: async (id: string) => {
+    const [c] = await db("/rest/v1/clients?select=id,business_name,price_mode&id=" + eq(id));
+    return c ? { id: c.id, name: c.business_name, price_mode: c.price_mode || null } : null;
+  },
+  // Emily's permanent memory (migration 0018): kept until someone tells her to forget it or an admin removes it.
+  memory: async () => (await db("/rest/v1/assistant_memory?select=id,fact,clients(business_name)&deleted_at=is.null&order=created_at&limit=200"))
+    .map((m: any) => ({ id: m.id, fact: m.fact, client: m.clients?.business_name || null })),
+  remember: async (m: { fact: string; client_id: string | null; phone: string }) =>
+    (await db("/rest/v1/assistant_memory", { method: "POST", body: JSON.stringify({ fact: m.fact, client_id: m.client_id, taught_by: m.phone }), headers: { Prefer: "return=representation" } }))[0].id,
+  forget: async (id: string) => /^[0-9a-f-]{36}$/i.test(id) &&
+    (await db("/rest/v1/assistant_memory?deleted_at=is.null&id=" + eq(id), { method: "PATCH", body: JSON.stringify({ deleted_at: new Date().toISOString() }), headers: { Prefer: "return=representation" } })).length > 0,
   // Emily only takes business orders, so she only sees the business catalog (morning items).
   findProducts: (q: string) => db("/rest/v1/products?select=id,name,unit,sku,list_price&active=is.true&catalog=eq.business&order=name" + (q.trim() ? "&or=(name.ilike." + like(q) + ",sku.ilike." + like(q) + ")" : "")),
   clientPrices: async (c: string) => (await db("/rest/v1/client_prices?select=product_id,price,products(name,unit)&client_id=" + eq(c)))
