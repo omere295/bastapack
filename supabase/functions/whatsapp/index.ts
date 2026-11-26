@@ -1,12 +1,16 @@
 // WhatsApp webhook for the BastaPack assistant (logic in ../_shared/assistant.js).
 // Meta calls this address for every message to the assistant's number.
 //   GET  → Meta's one-time webhook check (hub.verify_token must equal WHATSAPP_VERIFY_TOKEN)
-//   POST → incoming messages; the signature is checked with WHATSAPP_APP_SECRET, Meta gets 200 at once,
-//          and the reply is worked out in the background.
+//   POST from Meta → the signature is checked with WHATSAPP_APP_SECRET; each text message is saved, "typing…" is shown,
+//          and the database is asked (wa_enqueue, migration 0015) to call this function again for that message.
+//          Meta gets its 200 at once.
+//   POST with x-internal-key (from the database) → works out and sends the reply for one saved message, in the
+//          request itself. Background work after the reply to Meta was cut off after about a minute (23/11/2026),
+//          which left long messages unanswered; a request of its own may run up to 150 s.
 // Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY,
 // optional GITHUB_TOKEN (app change requests become issues in omere295/bastapack), ASSISTANT_MODEL, WHATSAPP_API_VERSION.
 
-import { handleMessage } from "../_shared/assistant.js";
+import { handleMessage, normalizePhone, receive } from "../_shared/assistant.js";
 
 const env = (k: string) => Deno.env.get(k) || "";
 const SB_URL = env("SUPABASE_URL"), SB_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
@@ -90,6 +94,7 @@ async function typing(messageId: string) {
 
 async function claude(body: unknown) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
+    signal: AbortSignal.timeout(60_000),
     method: "POST", headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(body),
   });
   const d = await r.json();
@@ -111,18 +116,39 @@ async function validSignature(raw: string, header: string | null) {
 
 const deps = { store, send, claude, typing, today, model: env("ASSISTANT_MODEL") || undefined };
 
-async function process(payload: any) {
+/** Meta's webhook: save, show typing, and queue each text message (answered by answer() below). */
+async function intake(payload: any) {
   for (const entry of payload.entry || []) for (const ch of entry.changes || []) for (const m of ch.value?.messages || []) {
-    const phone = "+" + String(m.from || "");
+    const phone = normalizePhone("+" + String(m.from || ""));
     try {
-      if (m.type === "text") await handleMessage(deps, { id: m.id, phone, text: m.text?.body || "" });
-      else if (await store.isAllowed(phone) && await store.saveIncoming({ id: m.id, phone, body: "[" + m.type + "]" }))
+      if (m.type === "text") {
+        if (await receive(deps, { id: m.id, phone, text: m.text?.body || "" })) await db("/rest/v1/rpc/wa_enqueue", { method: "POST", body: JSON.stringify({ p_id: m.id }) });
+      } else if (await store.isAllowed(phone) && await store.saveIncoming({ id: m.id, phone, body: "[" + m.type + "]" }))
         await send(phone, "כרגע אני מבינה רק הודעות טקסט. אפשר להעביר אליי הודעה מהמסעדה או לכתוב את ההזמנה.");
     } catch (e) {
-      console.error("assistant error", e);
+      console.error("intake error", e);
       await send(phone, "משהו השתבש אצלי (" + ((e as Error).message || "שגיאה") + "). נסו שוב בעוד רגע.");
     }
   }
+}
+
+/** Answers one saved message. If a newer message from the same person is already waiting, that one answers both. */
+async function answer(id: string) {
+  const [m] = await db("/rest/v1/wa_messages?select=id,phone,body,direction,created_at,handled_at&id=" + eq(id));
+  if (!m || m.direction !== "in" || m.handled_at) return "skip";
+  const done = () => db("/rest/v1/wa_messages?id=" + eq(id), { method: "PATCH", body: JSON.stringify({ handled_at: new Date().toISOString() }) });
+  const newer = await db("/rest/v1/wa_messages?select=id&direction=eq.in&phone=" + eq(m.phone) + "&created_at=gt." + encodeURIComponent(m.created_at) + "&limit=1");
+  if (newer.length) { await done(); return "newer"; }
+  const t0 = Date.now();
+  try {
+    await handleMessage(deps, { id: m.id, phone: m.phone, text: m.body }, { received: true });
+  } catch (e) {
+    console.error("assistant error", e);
+    await send(m.phone, "משהו השתבש אצלי (" + ((e as Error).message || "שגיאה") + "). נסו שוב בעוד רגע.");
+  }
+  await done();
+  console.log("answered", id, Date.now() - t0, "ms");
+  return "ok";
 }
 
 Deno.serve(async (req) => {
@@ -132,10 +158,17 @@ Deno.serve(async (req) => {
     return ok ? new Response(url.searchParams.get("hub.challenge") || "") : new Response("forbidden", { status: 403 });
   }
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+  const internal = req.headers.get("x-internal-key");
+  if (internal) {
+    const ok = (await db("/rest/v1/rpc/check_cron_key", { method: "POST", body: JSON.stringify({ p_key: internal }) }).catch(() => false)) === true;
+    if (!ok) return new Response("forbidden", { status: 403 });
+    const { process: id } = await req.json().catch(() => ({}));
+    return new Response(id ? await answer(String(id)) : "missing id");
+  }
   const raw = await req.text();
   if (!(await validSignature(raw, req.headers.get("x-hub-signature-256")))) return new Response("bad signature", { status: 401 });
   let payload; try { payload = JSON.parse(raw); } catch { return new Response("bad json", { status: 400 }); }
-  const work = process(payload);
+  const work = intake(payload);
   // @ts-ignore EdgeRuntime exists on Supabase
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(work); else await work;
   return new Response("ok");

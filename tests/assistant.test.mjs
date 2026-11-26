@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleMessage, normalizePhone, systemPrompt } from "../supabase/functions/_shared/assistant.js";
+import { handleMessage, normalizePhone, receive, systemPrompt } from "../supabase/functions/_shared/assistant.js";
 
 const OWNER = "+972500000001", STAFF = "+972500000002", STRANGER = "+972500000009";
 
@@ -150,6 +150,28 @@ test("Emily shows typing and gets the catalog in her instructions", async () => 
   const sys = w.claudeCalls[0].system[0];
   assert.match(sys.text, /p-salmon · סלמון · ק״ג/);
   assert.deepEqual(sys.cache_control, { type: "ephemeral" });
+});
+
+test("a message that takes too long gets a clear answer instead of silence", async () => {
+  let clock = 0;
+  const w = fakeWorld([
+    () => { clock += 60_000; return use("find_clients", { query: "ברוס" })(); },
+    () => { clock += 60_000; return use("find_products", { query: "סלמון" })(); },
+    say("never reached"),
+  ]);
+  w.deps.now = () => clock;
+  const r = await handleMessage(w.deps, { id: "m1", phone: OWNER, text: "הרבה הזמנות" });
+  assert.match(r, /יותר מדי זמן/);
+  assert.equal(w.claudeCalls.length, 2);
+});
+
+test("receive() saves and filters; handleMessage then answers without saving again", async () => {
+  const w = fakeWorld([say("היי")]);
+  assert.equal(await receive(w.deps, { id: "m1", phone: STRANGER, text: "x" }), false);
+  assert.equal(await receive(w.deps, { id: "m2", phone: OWNER, text: "היי" }), true);
+  assert.equal(await receive(w.deps, { id: "m2", phone: OWNER, text: "היי" }), false, "duplicate");
+  const r = await handleMessage(w.deps, { id: "m2", phone: OWNER, text: "היי" }, { received: true });
+  assert.equal(r, "היי");
 });
 
 test("the prompt tells the AI today's date and the coming days", () => {

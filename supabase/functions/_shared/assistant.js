@@ -43,6 +43,7 @@ export function systemPrompt(today, catalog = []) {
 - הפקה במורנינג (FIRE) ושינוי סיסמאות נעשים באפליקציה בלבד.
 - בקשה לשינוי או תיקון באפליקציה עצמה: לנסח אותה בבירור ולקרוא ל-request_app_change.
 - כשמציגים את עצמך או שואלים מי את: "אמילי, העוזרת של בסטה דגים". מדברים עלייך בלשון נקבה.
+- כשצריך כמה חיפושים או פעולות שלא תלויים זה בזה (למשל כמה לקוחות או כמה הזמנות בהודעה אחת), להפעיל את כל הכלים באותו תור, ביחד.
 - תשובות קצרות, בעברית, בסגנון וואטסאפ. אפשר *הדגשה*. בלי טבלאות.` +
     (catalog.length ? "\n\nקטלוג המוצרים העסקיים (id · שם · יחידה · מק״ט). להשתמש ב-id מכאן ישירות, בלי find_products:\n" + catalog.map((p) => p.id + " · " + p.name + " · " + (p.unit === "unit" ? "יחידה" : "ק״ג") + (p.sku ? " · " + p.sku : "")).join("\n")
       : "\n\nהקטלוג העסקי עדיין ריק: אי אפשר ליצור הזמנות עד שמנהל לוחץ באפליקציה על הגדרות → \"סנכרון מוצרים ממורנינג\". להסביר את זה אם מבקשים הזמנה.");
@@ -157,13 +158,27 @@ async function runPending(deps, phone, p) {
   return "לא הצלחתי לבצע את הפעולה.";
 }
 
-/** Handles one incoming text message. Returns the reply sent (or null when nothing was sent). */
-export async function handleMessage(deps, { id, phone, text }) {
+/** First step for a new message: only allowed numbers, each message once, and "typing…" straight away.
+ *  Returns true when the message should be answered. */
+export async function receive(deps, { id, phone, text }) {
   const s = deps.store;
   phone = normalizePhone(phone);
-  if (!(await s.isAllowed(phone))) return null;
-  if (!(await s.saveIncoming({ id, phone, body: text }))) return null; // WhatsApp sent it twice
+  if (!(await s.isAllowed(phone))) return false;
+  if (!(await s.saveIncoming({ id, phone, body: text }))) return false; // WhatsApp sent it twice
   if (deps.typing) { try { await deps.typing(id); } catch { /* only cosmetic */ } }
+  return true;
+}
+
+/** Longest Emily keeps working on one message before she says so (the server allows 150 s per request). */
+export const TIME_BUDGET_MS = 100_000;
+
+/** Handles one incoming text message. Returns the reply sent (or null when nothing was sent).
+ *  With {received: true} the message was already checked and saved by receive(). */
+export async function handleMessage(deps, { id, phone, text }, { received = false } = {}) {
+  const s = deps.store;
+  phone = normalizePhone(phone);
+  if (!received && !(await receive(deps, { id, phone, text }))) return null;
+  const started = (deps.now || Date.now)();
   const reply = async (t) => { await deps.send(phone, t); await s.saveOutgoing(phone, t); return t; };
 
   const pending = await s.getPending(phone);
@@ -193,6 +208,10 @@ export async function handleMessage(deps, { id, phone, text }) {
   // The fixed part (tools + rules + catalog) is cached by the API, so each turn starts faster and costs less.
   const system = [{ type: "text", text: systemPrompt(deps.today(), catalog), cache_control: { type: "ephemeral" } }];
   for (let turn = 0; turn < 8; turn++) {
+    if ((deps.now || Date.now)() - started > (deps.budgetMs ?? TIME_BUDGET_MS))
+      return reply("זה לוקח לי יותר מדי זמן, אז עצרתי באמצע. כדאי לפצל את ההודעה (למשל הזמנה אחת בכל הודעה) ולשלוח שוב. מה שכבר אישרתי נשמר.");
+    // "typing…" lasts 25 seconds in WhatsApp, so show it again on every round of work
+    if (turn > 0 && deps.typing) { try { await deps.typing(id); } catch { /* only cosmetic */ } }
     const res = await deps.claude({ model: deps.model || "claude-sonnet-5-5", max_tokens: 1200, system, tools: TOOLS, messages: msgs });
     msgs.push({ role: "assistant", content: res.content });
     const uses = (res.content || []).filter((b) => b.type === "tool_use");
