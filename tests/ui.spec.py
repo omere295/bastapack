@@ -97,6 +97,10 @@ with sync_playwright() as p:
     labels = pg.locator(".pricegrid label").all_inner_texts()
     check(any("סשימי סלמון · 103" in l for l in labels) and not any("סשימי סלמון נורווגי" in l for l in labels), "client price list shows morning products only")
     check(pg.locator(".modal button:has-text('מחירים מיוחדים')").get_attribute("aria-pressed") == "true", "client with saved prices is on special prices")
+    pg.click(".modal button:has-text('מילוי לפי מה ששילם במורנינג')"); pg.wait_for_timeout(300)
+    check("נמצאו 3 מחירים ב-12 מסמכים" in pg.inner_text(".modal"), "price list can be filled from what the client paid in morning")
+    filled = [v for v in (pg.locator(".pricegrid input").nth(i).input_value() for i in range(pg.locator(".pricegrid input").count())) if v]
+    check(len(filled) >= 3, "past prices fill the boxes (saved only on שמירה)")
     pg.click(".modal button:has-text('מחירים רגילים')"); pg.click(".modal button:has-text('שמירה')"); pg.wait_for_timeout(300)
     check(pg.locator("tr:has-text('סושי צפון') button").inner_text() == "מחירון: רגיל", "client can be switched to regular prices")
     check("למסעדת הנמל תמיד לנקות" in pg.inner_text("#emily-memory"), "settings show what Emily remembers")

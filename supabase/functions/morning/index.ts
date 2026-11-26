@@ -3,7 +3,9 @@
 //   {action: "sync_clients"}         → copies business clients from morning into the app
 //   {action: "sync_items"}           → copies morning's item list (פריטים) into the app as the business product catalog
 //   {action: "fire", order_id}       → creates a delivery note (תעודת משלוח, type 200) for a packed Business order
-// The two sync actions also run on a schedule (pg_cron, migration 0014): those calls carry x-cron-key, checked in the database.
+//   {action: "price_history", client_id} → the last price the client paid for each business product (past year's documents)
+// The two sync actions also run on a schedule (pg_cron, migration 0014). Those calls, and Emily's price_history calls,
+// carry x-cron-key, checked in the database.
 // Secrets (Supabase → Edge Functions → Secrets): MORNING_API_KEY_ID, MORNING_API_KEY_SECRET.
 // Optional MORNING_ENV=sandbox to use morning's practice environment.
 // API: token from api.morning.co/idp/v1/oauth/token (OAuth client credentials, valid 1 hour);
@@ -106,6 +108,42 @@ async function syncItems() {
   return { ...res, total: rows.length };
 }
 
+/** The last price a client actually paid for each business product, from his morning documents of the past year
+ *  (delivery notes, invoices, invoice-receipts; cancelled documents and minus lines are skipped). Prices are before VAT. */
+async function priceHistory(clientId: string) {
+  const [c] = await db("/rest/v1/clients?id=eq." + encodeURIComponent(clientId) + "&select=id,morning_id,business_name");
+  if (!c) throw new UserError("לקוח לא נמצא");
+  if (!c.morning_id) throw new UserError("הלקוח לא מקושר למורנינג");
+  const products = await db("/rest/v1/products?catalog=eq.business&select=id,name,unit,sku,morning_item_id,list_price");
+  const byItem = new Map(products.filter((p: any) => p.morning_item_id).map((p: any) => [p.morning_item_id, p]));
+  const bySku = new Map(products.filter((p: any) => p.sku).map((p: any) => [p.sku, p]));
+  const day = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(d);
+  const from = day(new Date(Date.now() - 365 * 86400_000)), to = day(new Date());
+  const found = new Map<string, any>();
+  let documents = 0;
+  for (let page = 1; page <= 5; page++) {
+    const r = await morning("/documents/search", { page, pageSize: 100, clientId: c.morning_id, fromDate: from, toDate: to, sort: "documentDate" });
+    const docs = r?.items || [];
+    for (const d of docs) {
+      if (d?.client?.id && d.client.id !== c.morning_id) continue;   // only this client's documents
+      if (![200, 300, 305, 320].includes(d?.type) || [3, 4].includes(d?.status)) continue;
+      if (!d.documentDate || d.documentDate < from) continue;
+      documents++;
+      for (const l of d.income || []) {
+        const p: any = byItem.get(l.itemId) || bySku.get(String(l.catalogNum ?? ""));
+        if (!p || !(Number(l.price) > 0)) continue;
+        const net = l.vatType === 1 ? Number(l.price) / (1 + Number(l.vatRate ?? d.vatRate ?? 0.18)) : Number(l.price);
+        const prev = found.get(p.id);
+        if (prev && prev.date >= d.documentDate) continue;
+        found.set(p.id, { product_id: p.id, name: p.name, unit: p.unit, price: Math.round(net * 100) / 100, date: d.documentDate, doc: String(d.number ?? ""),
+          regular: p.list_price != null ? Number(p.list_price) : null });
+      }
+    }
+    if (docs.length < 100 || (r.pages && page >= r.pages)) break;
+  }
+  return { client: c.business_name, documents, prices: [...found.values()].sort((a, b) => a.name.localeCompare(b.name, "he")) };
+}
+
 async function fire(orderId: string) {
   await rpc("claim_fire", { p_order: orderId });
   try {
@@ -145,13 +183,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "בקשה לא תקינה" }, 400); }
-  const cron = !!req.headers.get("x-cron-key") && ["sync_items", "sync_clients"].includes(body?.action)
+  const cron = !!req.headers.get("x-cron-key") && ["sync_items", "sync_clients", "price_history"].includes(body?.action)
     && (await rpc("check_cron_key", { p_key: req.headers.get("x-cron-key") }).catch(() => false)) === true;
   if (!cron && roleOf(req) !== "admin") return json({ error: "פעולה למנהל בלבד" }, 403);
   try {
     if (body.action === "test") { await morning("/clients/search", { page: 1, pageSize: 1 }); return json({ ok: true, sandbox: SANDBOX }); }
     if (body.action === "sync_clients") return json(await syncClients());
     if (body.action === "sync_items") return json(await syncItems());
+    if (body.action === "price_history" && body.client_id) return json(await priceHistory(String(body.client_id)));
     if (body.action === "fire" && body.order_id) return json(await fire(String(body.order_id)));
     return json({ error: "פעולה לא מוכרת" }, 400);
   } catch (e) {

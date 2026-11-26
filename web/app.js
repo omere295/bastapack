@@ -730,9 +730,11 @@ function renderModal() {
     h += '<h3 id="m-title">מחירון · ' + esc(c.business_name) + '</h3>' +
       '<div class="seg small" role="group" aria-label="סוג מחירון"><button data-act="pmode:regular" aria-pressed="' + (mode === "regular") + '">מחירים רגילים</button><button data-act="pmode:special" aria-pressed="' + (mode === "special") + '">מחירים מיוחדים</button><button data-act="pmode:" aria-pressed="' + (!mode) + '">לא נקבע</button></div>' +
       '<p class="muted">' + (mode === "regular" ? "הלקוח משלם תמיד את המחיר הרגיל ממורנינג. מחיר שתכתבו כאן גובר עליו." : mode === "special" ? "ללקוח מחירים משלו. אמילי תשאל על כל מוצר שאין לו מחיר כאן." : "אמילי תשאל בפעם הבאה: \"יש לו מחירים מיוחדים?\"") + '</p>' +
-      '<p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p><div class="pricegrid">' +
+      '<p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p>' +
+      '<div class="rowform"><button class="btn small sea" data-act="m-pasthist"' + (ui.busy ? " disabled" : "") + '>' + (ui.busy ? "קורא ממורנינג…" : "מילוי לפי מה ששילם במורנינג") + '</button></div>' +
+      (m.info ? '<p class="msg info">' + esc(m.info) + "</p>" : "") + '<div class="pricegrid">' +
       (catalog("business").length ? "" : '<p class="msg info">' + esc(NO_BIZ_PRODUCTS) + "</p>") +
-      catalog("business").map((p) => { const v = (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(prodLabel(p)) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="' + (p.list_price != null ? "רגיל " + esc(String(Number(p.list_price))) : "—") + '">'; }).join("") +
+      catalog("business").map((p) => { const v = m.fill && m.fill[p.id] != null ? m.fill[p.id] : (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(prodLabel(p)) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="' + (p.list_price != null ? "רגיל " + esc(String(Number(p.list_price))) : "—") + '">'; }).join("") +
       "</div>" + (m.err ? '<div class="err">' + esc(m.err) + "</div>" : "") + '<div class="mact"><button class="btn primary" data-act="m-prices">שמירה</button><button class="btn" data-act="m-close">ביטול</button></div>';
   } else if (m.type === "form") h += renderOrderForm(m);
   return h + "</div></div>";
@@ -975,6 +977,20 @@ document.addEventListener("click", (e) => {
     case "prod-unit": act(() => B.updateProduct(b, { unit: c === "unit" ? "unit" : "kg" })); break;
     case "m-close": closeModal(); break;
     case "pmode": ui.modal.mode = b || null; render(); break;
+    case "m-pasthist": {
+      const m = ui.modal;
+      // keep what was typed, then fill in the last price paid for each product (nothing is saved until שמירה)
+      const typed = {}; document.querySelectorAll("[data-cprice]").forEach((el) => { typed[el.dataset.cprice] = el.value; });
+      ui.busy = true; render();
+      B.morning({ action: "price_history", client_id: m.cid }).then((r) => {
+        m.fill = { ...typed };
+        for (const p of r.prices || []) m.fill[p.product_id] = String(p.price);
+        const diff = (r.prices || []).filter((p) => p.regular != null && p.price !== p.regular).length;
+        m.info = r.prices?.length ? "נמצאו " + r.prices.length + " מחירים ב-" + r.documents + " מסמכים מהשנה האחרונה (" + diff + " שונים מהרגיל). בדקו ולחצו שמירה." : "לא נמצאו מסמכים עם מוצרים מהקטלוג בשנה האחרונה.";
+        if (r.prices?.length && m.mode === undefined && !client(m.cid).price_mode) m.mode = "special";
+      }).catch((e) => { m.err = e.message; }).finally(() => { ui.busy = false; render(); });
+      break;
+    }
     case "mem-del": act(() => B.forgetMemory(b), { okToast: "הוסר מהזיכרון של אמילי" }); break;
     case "m-ok": { const run = modalRun; ui.modal = null; modalRun = null; render(); if (run) run(); break; }
     case "m-csv": runCSV(); break;

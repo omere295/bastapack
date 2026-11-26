@@ -232,6 +232,13 @@ export class DemoBackend {
     this._admin();
     if (body.action === "test") return { ok: true, demo: true };
     if (body.action === "sync_clients") return { added: 0, updated: this.db.clients.length, total: this.db.clients.length };
+    if (body.action === "price_history") {
+      // pretend morning's documents show the client paid the saved price, or ₪5 over the regular price
+      const mine = Object.fromEntries(this.db.prices.filter((x) => x.client_id === body.client_id).map((x) => [x.product_id, x.price]));
+      const prices = this.db.products.filter((p) => p.catalog === "business" && p.list_price != null).slice(0, 3)
+        .map((p) => ({ product_id: p.id, name: p.name, unit: p.unit, price: mine[p.id] ?? p.list_price + 5, regular: p.list_price, date: "2026-11-20", doc: "27001" }));
+      return clone({ client: this.db.clients.find((c) => c.id === body.client_id)?.business_name, documents: 12, prices });
+    }
     if (body.action === "sync_items") { const n = this.db.products.filter((p) => p.catalog === "business").length; return { added: 0, updated: n, deactivated: 0, total: n }; }
     if (body.action === "fire") {
       const o = this.db.orders.find((x) => x.id === body.order_id);

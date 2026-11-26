@@ -6,6 +6,7 @@
 //            saveOutgoing(phone, text), history(phone, n), getPending(phone), setPending(phone, p), clearPending(phone),
 //            findClients(q), getClient(id) → {id, name, price_mode}, findProducts(q), clientPrices(clientId), listOrders(filter), getOrder(number),
 //            memory() → [{id, fact, client}], remember({fact, client_id, phone}) → id, forget(id) → bool,
+//            pastPrices(clientId) → {documents, prices: [{product_id, name, unit, price, regular, date}]} (from morning),
 //            rpc(name, args), addAllowed(phone, name), removeAllowed(phone), createIssue(title, body) },
 //   claude(body) → Anthropic Messages API response,
 //   send(phone, text),
@@ -39,8 +40,9 @@ export function systemPrompt(today, catalog = [], memory = []) {
 - לקוח: לחפש עם find_clients. אם יש כמה התאמות או אף אחת, לשאול ("לא מצאתי את ברוס במורנינג, אולי ברוס בורגר בע״מ?"). כשמתברר כינוי חדש ללקוח, לשמור אותו עם add_alias.
 - מוצרים: רק מהקטלוג העסקי (הפריטים במורנינג). אפשר לזהות מוצר גם לפי מק״ט. אם מוצר לא קיים בקטלוג, לא להמציא: להציע את הקרובים או לבקש להוסיף אותו במורנינג ולסנכרן. כמות בק״ג למוצרי משקל, ביחידות למוצרי יחידה. מוצר במשקל שהוזמן ביחידות ("2 יח׳ פילה סלמון"): amount = מספר היחידות עם pieces=true, ושוקלים באריזה. הוראות לפריט ("לפלט", "להביא ראש ואידרה") נכנסות ל-note של אותו פריט.
 - מחירים: לפני מע״מ, לק״ג או ליחידה. לכל לקוח עסקי יש סוג מחירון (price_mode ב-find_clients): regular = תמיד המחיר הרגיל של המוצר מהקטלוג (₪ בקטלוג). special = המחירים המיוחדים שלו (get_client_prices). ריק = עוד לא שאלו.
-- בפעם הראשונה שעולה לקוח שסוג המחירון שלו ריק, לשאול: "יש לו מחירים מיוחדים?". אם לא: set_price_mode עם regular. אם כן: set_price_mode עם special, לבקש את המחירים ולשמור כל אחד עם set_price. מה שנשמר נשאר עד ששינו אותו.
-- ללקוח special, מוצר בלי מחיר שמור: create_order יחזיר אותו. לשאול מה המחיר שלו (ולהציע את הרגיל), לשמור עם set_price ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices. כשמאשרים הזמנה, לציין ליד כל פריט את המחיר ואם הוא מיוחד או רגיל.
+- בפעם הראשונה שעולה לקוח שסוג המחירון שלו ריק, create_order מחזיר ask_price_mode יחד עם past_prices: המחיר האחרון ששילם על כל מוצר במסמכים שלו במורנינג בשנה האחרונה (price מול regular). אם יש מחירים ששונים מהרגיל, להציג אותם בקצרה ("פילה לברק: שילם ₪120, רגיל ₪110") ולשאול: "יש לו מחירים מיוחדים? לשמור את המחירים ממורנינג כמחירים שלו?". אם אין הבדל או אין מסמכים, לשאול רק "יש לו מחירים מיוחדים?" ולציין מה נמצא. אם לא: set_price_mode עם regular. אם כן: set_price_mode עם special ולשמור עם set_price את כל המחירים שנמצאו (ואת מה שהוא מתקן או מוסיף). מה שנשמר נשאר עד ששינו אותו.
+- past_prices: מושך בכל רגע את המחירים האחרונים של לקוח ממורנינג (למשל "תמשכי מחירים של X ממורנינג"). לשמור אותם רק אחרי שאישרו.
+- ללקוח special, מוצר בלי מחיר שמור: create_order יחזיר אותו (עם last_paid אם שילם עליו בעבר). לשאול מה המחיר שלו (ולהציע את מה ששילם בפעם האחרונה או את הרגיל), לשמור עם set_price ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices. כשמאשרים הזמנה, לציין ליד כל פריט את המחיר ואם הוא מיוחד או רגיל.
 - זיכרון קבוע: כשמלמדים אותך משהו שצריך לזכור תמיד (כלל עבודה, העדפה או פרט קבוע על לקוח), לשמור עם remember ולכתוב "אזכור: …". כשמבקשים לשנות או לשכוח משהו שזכרת, forget לישן ו-remember לחדש אם צריך. מחירים, כינויים וסוג מחירון נשמרים בכלים שלהם ולא בזיכרון. הוראה להזמנה אחת לא לזכור.
 - אחרי יצירה או עדכון: לאשר במלואו: מספר הזמנה, לקוח, יום ותאריך, פריטים וכמויות, משלוח או איסוף.
 - פעולות שדורשות אישור (ביטול הזמנה, שינוי מחיר קיים, הוספה/הסרה של מספר מורשה, שינוי באפליקציה): הכלי שומר אותן וממתין. לכתוב בדיוק מה יקרה ולבקש להשיב "כן" לאישור. אל תכתבי שהפעולה בוצעה לפני האישור.
@@ -69,6 +71,7 @@ export const TOOLS = [
     items: { type: "array", items: { type: "object", properties: { product_id: { type: "string" }, amount: { type: "number" }, pieces: { type: "boolean", description: "true כשמוצר במשקל הוזמן ביחידות (\"2 יח׳ פילה סלמון\"): amount הוא מספר היחידות, ושוקלים באריזה" }, note: { type: "string", description: "הערה לפריט, למשל \"לפלט, להביא ראש ואידרה\"" } }, required: ["product_id", "amount"] } } }, required: ["number"] } },
   { name: "cancel_order", description: "מבקש לבטל הזמנה. דורש אישור \"כן\" מהשולח.", input_schema: { type: "object", properties: { number: { type: "string" } }, required: ["number"] } },
   { name: "set_price", description: "שומר מחיר ללקוח למוצר. מחיר חדש נשמר מיד; שינוי מחיר קיים דורש אישור \"כן\".", input_schema: { type: "object", properties: { client_id: { type: "string" }, product_id: { type: "string" }, price: { type: "number" } }, required: ["client_id", "product_id", "price"] } },
+  { name: "past_prices", description: "המחיר האחרון ששילם הלקוח על כל מוצר, מהמסמכים שלו במורנינג בשנה האחרונה (לפני מע״מ), לצד המחיר הרגיל.", input_schema: { type: "object", properties: { client_id: { type: "string" } }, required: ["client_id"] } },
   { name: "set_price_mode", description: "קובע את סוג המחירון של לקוח: regular (תמיד המחיר הרגיל מהקטלוג) או special (מחירים מיוחדים שנשמרים עם set_price).", input_schema: { type: "object", properties: { client_id: { type: "string" }, mode: { type: "string", enum: ["regular", "special"] } }, required: ["client_id", "mode"] } },
   { name: "remember", description: "שומר לתמיד משהו שלימדו אותך (כלל, העדפה, פרט קבוע על לקוח). client_id אם זה על לקוח מסוים.", input_schema: { type: "object", properties: { fact: { type: "string" }, client_id: { type: "string" } }, required: ["fact"] } },
   { name: "forget", description: "מוחק משהו מהזיכרון הקבוע לפי ה-id שלו (מהרשימה \"דברים שלימדו אותך\").", input_schema: { type: "object", properties: { memory_id: { type: "string" } }, required: ["memory_id"] } },
@@ -87,6 +90,12 @@ export function normalizePhone(p) {
 
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 
+/** The client's past prices from morning, or null when morning cannot be reached (Emily then just asks). */
+async function pastPrices(s, clientId) {
+  if (!s.pastPrices) return null;
+  try { return await s.pastPrices(clientId); } catch { return null; }
+}
+
 async function runTool(deps, phone, name, input) {
   const s = deps.store;
   switch (name) {
@@ -101,15 +110,20 @@ async function runTool(deps, phone, name, input) {
         const client = await s.getClient(input.client_id);
         if (!client) return { error: "לקוח לא נמצא" };
         const prices = await s.clientPrices(input.client_id);
-        if (!client.price_mode && !prices.length)
-          return { error: "ask_price_mode", question: "יש ל" + client.name + " מחירים מיוחדים?", hint: "לשאול. לא → set_price_mode regular. כן → set_price_mode special, לבקש מחירים ולשמור עם set_price. ואז ליצור." };
+        if (!client.price_mode && !prices.length) {
+          const past = await pastPrices(s, input.client_id);
+          return { error: "ask_price_mode", question: "יש ל" + client.name + " מחירים מיוחדים?", past_prices: past,
+            hint: "להראות את מה ששונה מהרגיל ולשאול. לא → set_price_mode regular. כן → set_price_mode special ולשמור את המחירים עם set_price. ואז ליצור." };
+        }
         // regular: the client's saved price if any, else the item's regular price. special: only the client's own prices.
         const catalog = await s.findProducts("");
         const have = new Set(prices.map((p) => p.product_id));
         if (client.price_mode === "regular") for (const p of catalog) if (p.list_price != null) have.add(p.id);
         const missing = (input.items || []).filter((i) => !have.has(i.product_id)).map((i) => i.product_id);
         if (missing.length) {
-          const named = catalog.filter((p) => missing.includes(p.id)).map((p) => ({ name: p.name, regular_price: p.list_price != null ? Number(p.list_price) : null }));
+          const past = client.price_mode === "regular" ? null : await pastPrices(s, input.client_id);
+          const paid = Object.fromEntries((past?.prices || []).map((p) => [p.product_id, p.price]));
+          const named = catalog.filter((p) => missing.includes(p.id)).map((p) => ({ name: p.name, regular_price: p.list_price != null ? Number(p.list_price) : null, ...(paid[p.id] != null ? { last_paid: paid[p.id] } : {}) }));
           return { error: "missing_prices", missing_products: named.length ? named : missing,
             hint: client.price_mode === "regular" ? "אין מחיר רגיל במורנינג: לשאול את המחיר ולשמור עם set_price" : "ללקוח מחירים מיוחדים: לשאול את המחיר שלו (להציע את הרגיל), לשמור עם set_price, ואז ליצור שוב" };
         }
@@ -140,6 +154,7 @@ async function runTool(deps, phone, name, input) {
       await s.setPending(phone, { action: "set_price", args: { client_id: input.client_id, product_id: input.product_id, price }, summary });
       return { needs_confirmation: true, summary, old_price: Number(current.price), new_price: price };
     }
+    case "past_prices": return (await pastPrices(s, input.client_id)) || { error: "לא הצלחתי לקרוא את המסמכים ממורנינג" };
     case "set_price_mode": {
       if (!["regular", "special"].includes(input.mode)) return { error: "סוג מחירון לא תקין" };
       await s.rpc("wa_set_price_mode", { p_client: input.client_id, p_mode: input.mode });

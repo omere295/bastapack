@@ -136,7 +136,7 @@ export class SupabaseBackend {
     return data;
   }
 
-  /** Calls the morning Edge Function: {action: "test" | "sync_clients" | "fire", order_id?}. */
+  /** Calls the morning Edge Function: {action: "test" | "sync_clients" | "sync_items" | "fire" | "price_history", order_id?, client_id?}. */
   async morning(body) {
     await this._fresh();
     let res;

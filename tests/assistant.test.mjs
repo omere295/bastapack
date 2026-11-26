@@ -9,7 +9,7 @@ function fakeWorld(script) {
     sent: [], rpcCalls: [], pending: {}, seen: new Set(), log: [], allowed: { [OWNER]: true, [STAFF]: false }, issues: [],
     prices: [{ client_id: "c1", product_id: "p-salmon", product: "סלמון", price: 120 }],
     claudeCalls: [], clients: { c1: { id: "c1", name: "ברוס בורגר בע״מ", price_mode: "special" }, c2: { id: "c2", name: "מסעדה חדשה", price_mode: null } },
-    memory: [],
+    memory: [], past: { c2: [{ product_id: "p-tuna", name: "טונה", unit: "kg", price: 330, regular: 340, date: "2026-11-20" }] },
   };
   w.store = {
     isAllowed: async (p) => p in w.allowed,
@@ -26,6 +26,7 @@ function fakeWorld(script) {
     memory: async () => w.memory.filter((m) => !m.gone),
     remember: async (m) => { const id = "mem-" + (w.memory.length + 1); w.memory.push({ id, fact: m.fact, client: m.client_id ? w.clients[m.client_id]?.name : null }); return id; },
     forget: async (id) => { const m = w.memory.find((x) => x.id === id && !x.gone); if (m) m.gone = true; return !!m; },
+    pastPrices: async (c) => ({ documents: 3, prices: w.past[c] || [] }),
     clientPrices: async (c) => w.prices.filter((p) => p.client_id === c),
     listOrders: async () => [],
     getOrder: async (n) => (n === "B-1043" ? { number: "B-1043", client: "ברוס בורגר", date: "2026-11-24" } : null),
@@ -256,4 +257,38 @@ test("things taught on WhatsApp stay in Emily's instructions until she is told t
   await handleMessage(w.deps, { id: "m3", phone: OWNER, text: "תשכחי את זה" });
   await handleMessage(w.deps, { id: "m4", phone: OWNER, text: "היי" });
   assert.doesNotMatch(w.claudeCalls[5].system[0].text, /לנקות את הדג/);
+});
+
+test("the first time a client comes up, Emily gets his past prices from morning to suggest", async () => {
+  let seen;
+  const w = fakeWorld([
+    use("create_order", { client_id: "c2", delivery_date: "2026-11-24", items: [{ product_id: "p-tuna", amount: 2 }] }),
+    (body) => { seen = lastToolResult(body); return say("שילם ₪330 על טונה (רגיל ₪340). לשמור?")(); },
+  ]);
+  await handleMessage(w.deps, { id: "m1", phone: OWNER, text: "2 קילו טונה למסעדה חדשה למחר" });
+  assert.equal(seen.error, "ask_price_mode");
+  assert.deepEqual(seen.past_prices.prices.map((p) => [p.name, p.price, p.regular]), [["טונה", 330, 340]]);
+});
+
+test("a special client missing an item's price: Emily sees what he paid last time", async () => {
+  let seen;
+  const w = fakeWorld([
+    use("create_order", { client_id: "c1", delivery_date: "2026-11-24", items: [{ product_id: "p-tuna", amount: 2 }] }),
+    (body) => { seen = lastToolResult(body); return say("?")(); },
+  ]);
+  w.past.c1 = [{ product_id: "p-tuna", name: "טונה", unit: "kg", price: 350, regular: null, date: "2026-10-01" }];
+  await handleMessage(w.deps, { id: "m1", phone: OWNER, text: "2 קילו טונה לברוס למחר" });
+  assert.deepEqual(seen.missing_products, [{ name: "טונה", regular_price: null, last_paid: 350 }]);
+});
+
+test("if morning cannot be reached, Emily still asks instead of failing", async () => {
+  let seen;
+  const w = fakeWorld([
+    use("create_order", { client_id: "c2", delivery_date: "2026-11-24", items: [{ product_id: "p-tuna", amount: 2 }] }),
+    (body) => { seen = lastToolResult(body); return say("יש לו מחירים מיוחדים?")(); },
+  ]);
+  w.store.pastPrices = async () => { throw new Error("down"); };
+  await handleMessage(w.deps, { id: "m1", phone: OWNER, text: "2 קילו טונה למסעדה חדשה למחר" });
+  assert.equal(seen.error, "ask_price_mode");
+  assert.equal(seen.past_prices, null);
 });

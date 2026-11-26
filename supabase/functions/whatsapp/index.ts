@@ -64,6 +64,17 @@ const store = {
     (await db("/rest/v1/assistant_memory", { method: "POST", body: JSON.stringify({ fact: m.fact, client_id: m.client_id, taught_by: m.phone }), headers: { Prefer: "return=representation" } }))[0].id,
   forget: async (id: string) => /^[0-9a-f-]{36}$/i.test(id) &&
     (await db("/rest/v1/assistant_memory?deleted_at=is.null&id=" + eq(id), { method: "PATCH", body: JSON.stringify({ deleted_at: new Date().toISOString() }), headers: { Prefer: "return=representation" } })).length > 0,
+  // The last price the client paid for each product, read from his morning documents by the morning function
+  // (price_history, allowed with the internal key from the database).
+  pastPrices: async (clientId: string) => {
+    const key = await db("/rest/v1/rpc/internal_key", { method: "POST", body: "{}" });
+    const r = await fetch(SB_URL + "/functions/v1/morning", { method: "POST", signal: AbortSignal.timeout(40_000),
+      headers: { Authorization: "Bearer " + env("SUPABASE_ANON_KEY"), "Content-Type": "application/json", "x-cron-key": key },
+      body: JSON.stringify({ action: "price_history", client_id: clientId }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "morning " + r.status);
+    return { documents: d.documents, prices: d.prices.map((p: any) => ({ product_id: p.product_id, name: p.name, unit: p.unit, price: p.price, regular: p.regular, date: p.date })) };
+  },
   // Emily only takes business orders, so she only sees the business catalog (morning items).
   findProducts: (q: string) => db("/rest/v1/products?select=id,name,unit,sku,list_price&active=is.true&catalog=eq.business&order=name" + (q.trim() ? "&or=(name.ilike." + like(q) + ",sku.ilike." + like(q) + ")" : "")),
   clientPrices: async (c: string) => (await db("/rest/v1/client_prices?select=product_id,price,products(name,unit)&client_id=" + eq(c)))
