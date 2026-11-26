@@ -6,12 +6,13 @@
 //          Meta gets its 200 at once.
 //   POST with x-internal-key (from the database) → answers the oldest waiting message of that person, in the request
 //          itself, then queues the next one (migration 0016). One person's messages are answered one at a time, in
-//          order; a message with several orders is first split into one message per order. Background work after the
+//          order; a message with several orders is split into one row per order, the orders are worked on side by side,
+//          and one summary is sent ("בוצע ✅" + the critical questions, one at a time; migration 0020). Background work after the
 //          reply to Meta was cut off after about a minute (23/11/2026); a request of its own may run up to 150 s.
 // Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY,
 // optional GITHUB_TOKEN (app change requests become issues in omere295/bastapack), ASSISTANT_MODEL, WHATSAPP_API_VERSION.
 
-import { handleMessage, maybeSeveralOrders, normalizePhone, receive, splitOrders } from "../_shared/assistant.js";
+import { batchSummary, handleBatchPart, handleMessage, maybeSeveralOrders, normalizePhone, receive, splitOrders } from "../_shared/assistant.js";
 
 const env = (k: string) => Deno.env.get(k) || "";
 const SB_URL = env("SUPABASE_URL"), SB_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
@@ -74,6 +75,20 @@ const store = {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "morning " + r.status);
     return { documents: d.documents, prices: d.prices.map((p: any) => ({ product_id: p.product_id, name: p.name, unit: p.unit, price: p.price, regular: p.regular, date: p.date })) };
+  },
+  // Critical questions from multi-order messages (migration 0020), asked one at a time.
+  openQuestion: async (phone: string) => {
+    const [q] = await db("/rest/v1/wa_messages?select=id,body,result_text&result=eq.question&asked_at=not.is.null&resolved_at=is.null&phone=" + eq(phone) +
+      "&created_at=gte." + new Date(Date.now() - 24 * 3600_000).toISOString() + "&order=created_at&limit=1");
+    return q ? { id: q.id, order: q.body, question: q.result_text } : null;
+  },
+  resolveQuestion: (id: string) => db("/rest/v1/wa_messages?id=" + eq(id), { method: "PATCH", body: JSON.stringify({ resolved_at: new Date().toISOString() }) }),
+  nextQuestion: async (phone: string) => {
+    const qs = await db("/rest/v1/wa_messages?select=id,result_text&result=eq.question&asked_at=is.null&resolved_at=is.null&phone=" + eq(phone) +
+      "&created_at=gte." + new Date(Date.now() - 24 * 3600_000).toISOString() + "&order=created_at&limit=50");
+    if (!qs.length) return null;
+    await db("/rest/v1/wa_messages?id=" + eq(qs[0].id), { method: "PATCH", body: JSON.stringify({ asked_at: new Date().toISOString() }) });
+    return { id: qs[0].id, question: qs[0].result_text, remaining: qs.length - 1 };
   },
   // Emily only takes business orders, so she only sees the business catalog (morning items).
   findProducts: (q: string) => db("/rest/v1/products?select=id,name,unit,sku,list_price&active=is.true&catalog=eq.business&order=name" + (q.trim() ? "&or=(name.ilike." + like(q) + ",sku.ilike." + like(q) + ")" : "")),
@@ -166,6 +181,38 @@ async function intake(payload: any) {
 
 const rpc = (name: string, args: unknown) => db("/rest/v1/rpc/" + name, { method: "POST", body: JSON.stringify(args) });
 
+/** Works on the orders of one multi-order message side by side (4 at a time; no chat history, so they cannot get
+ *  mixed up), stores each outcome, and when all are done sends one message: "בוצע ✅" + a line per order + the first
+ *  critical question. Orders not reached within ~80 s are left for the next request. */
+async function runBatch(phone: string, base: string) {
+  const started = Date.now();
+  const parts = await db("/rest/v1/wa_messages?select=id,body&direction=eq.in&handled_at=is.null&hidden=is.false&phone=" + eq(phone) +
+    "&id=like." + encodeURIComponent(base + "#*") + "&order=created_at");
+  let next = 0;
+  const worker = async () => {
+    while (next < parts.length && Date.now() - started < 80_000) {
+      const p = parts[next++];
+      let r;
+      try { r = await handleBatchPart(deps, { id: base, phone, text: p.body }); }
+      catch (e) { console.error("batch part failed", p.id, e); r = { status: "question", text: "לא הצלחתי לפתוח את ההזמנה (" + ((e as Error).message || "שגיאה") + "): \"" + String(p.body).slice(0, 80) + "\". לשלוח אותה שוב?" }; }
+      await db("/rest/v1/wa_messages?id=" + eq(p.id), { method: "PATCH", body: JSON.stringify({ handled_at: new Date().toISOString(), started_at: new Date().toISOString(), result: r.status, result_text: r.text }) });
+    }
+  };
+  await Promise.all([1, 2, 3, 4].map(worker));
+  const all = await db("/rest/v1/wa_messages?select=id,body,result,result_text,handled_at&direction=eq.in&phone=" + eq(phone) +
+    "&id=like." + encodeURIComponent(base + "#*") + "&order=created_at");
+  if (all.some((p: any) => !p.handled_at)) return "batch partial";
+  // send the summary once, even if two requests get here
+  const claimed = await db("/rest/v1/wa_messages?result=is.null&id=" + eq(base), { method: "PATCH", body: JSON.stringify({ result: "summarized" }), headers: { Prefer: "return=representation" } });
+  if (!claimed.length) return "batch done";
+  const questions = all.filter((p: any) => p.result !== "done");
+  if (questions.length) await db("/rest/v1/wa_messages?id=" + eq(questions[0].id), { method: "PATCH", body: JSON.stringify({ asked_at: new Date().toISOString() }) });
+  const text = batchSummary(all);
+  await send(phone, text);
+  await store.saveOutgoing(phone, text);
+  return "batch " + all.length;
+}
+
 /** Answers the oldest waiting message of the person who sent message `id`, then queues the next one.
  *  Only one request works for a person at a time (wa_claim); others return "busy" and the holder carries on. */
 async function answer(id: string) {
@@ -183,14 +230,14 @@ async function answer(id: string) {
         await done();
         await send(phone, "לא הצלחתי לטפל בהודעה הזו גם אחרי כמה ניסיונות: \"" + String(m.body).slice(0, 60) + "…\". נסו לשלוח אותה שוב, אולי בחלקים.");
         result = "gave up";
-      } else if (!String(m.id).includes("#") && maybeSeveralOrders(m.body) && (await splitOrders(deps, m.body).then(async (parts) => {
+      } else if (String(m.id).includes("#")) {
+        result = await runBatch(phone, String(m.id).split("#")[0]);
+      } else if (maybeSeveralOrders(m.body) && (await splitOrders(deps, m.body).then(async (parts) => {
         if (parts.length < 2) return false;
         await rpc("wa_split", { p_id: m.id, p_parts: parts });
-        await send(phone, "קיבלתי " + parts.length + " הזמנות. מטפלת בהן אחת אחת, ואענה על כל אחת בנפרד.");
-        await store.saveOutgoing(phone, "קיבלתי " + parts.length + " הזמנות. מטפלת בהן אחת אחת.");
         return true;
       }).catch((e) => { console.error("split failed", e); return false; }))) {
-        result = "split";
+        result = await runBatch(phone, m.id);
       } else {
         try {
           await handleMessage(deps, { id: String(m.id).split("#")[0], phone, text: m.body }, { received: true, current: m.id });

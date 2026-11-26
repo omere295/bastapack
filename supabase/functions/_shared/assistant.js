@@ -23,7 +23,7 @@ const YES = /^(yes|y|ok|כן|אישור|מאשר|מאשרת|בטח|יאללה)$/
 const NO = /^(no|n|לא|ביטול|בטל|עזוב)$/i;
 const clean = (t) => String(t || "").trim().replace(/[.!?,\s]+$/g, "").replace(/^\s+/, "");
 
-export function systemPrompt(today, catalog = [], memory = []) {
+export function systemPrompt(today, catalog = [], memory = [], opts = {}) {
   const d = new Date(today + "T12:00:00Z");
   const lines = [];
   for (let i = 0; i < 8; i++) { const x = new Date(d); x.setUTCDate(d.getUTCDate() + i); lines.push(DAYS[x.getUTCDay()] + " " + x.toISOString().slice(0, 10)); }
@@ -39,12 +39,11 @@ export function systemPrompt(today, catalog = [], memory = []) {
 - אם לא נאמר יום, תמיד לשאול לאיזה יום. לא לנחש.
 - לקוח: לחפש עם find_clients. אם יש כמה התאמות או אף אחת, לשאול ("לא מצאתי את ברוס במורנינג, אולי ברוס בורגר בע״מ?"). כשמתברר כינוי חדש ללקוח, לשמור אותו עם add_alias.
 - מוצרים: רק מהקטלוג העסקי (הפריטים במורנינג). אפשר לזהות מוצר גם לפי מק״ט. אם מוצר לא קיים בקטלוג, לא להמציא: להציע את הקרובים או לבקש להוסיף אותו במורנינג ולסנכרן. כמות בק״ג למוצרי משקל, ביחידות למוצרי יחידה. מוצר במשקל שהוזמן ביחידות ("2 יח׳ פילה סלמון"): amount = מספר היחידות עם pieces=true, ושוקלים באריזה. הוראות לפריט ("לפלט", "להביא ראש ואידרה") נכנסות ל-note של אותו פריט.
-- מחירים: לפני מע״מ, לק״ג או ליחידה. לכל לקוח עסקי יש סוג מחירון (price_mode ב-find_clients): regular = תמיד המחיר הרגיל של המוצר מהקטלוג (₪ בקטלוג). special = המחירים המיוחדים שלו (get_client_prices). ריק = עוד לא שאלו.
-- בפעם הראשונה שעולה לקוח שסוג המחירון שלו ריק, create_order מחזיר ask_price_mode יחד עם past_prices: המחיר האחרון ששילם על כל מוצר במסמכים שלו במורנינג בשנה האחרונה (price מול regular). אם יש מחירים ששונים מהרגיל, להציג אותם בקצרה ("פילה לברק: שילם ₪120, רגיל ₪110") ולשאול: "יש לו מחירים מיוחדים? לשמור את המחירים ממורנינג כמחירים שלו?". אם אין הבדל או אין מסמכים, לשאול רק "יש לו מחירים מיוחדים?" ולציין מה נמצא. אם לא: set_price_mode עם regular. אם כן: set_price_mode עם special ולשמור עם set_price את כל המחירים שנמצאו (ואת מה שהוא מתקן או מוסיף). מה שנשמר נשאר עד ששינו אותו.
-- past_prices: מושך בכל רגע את המחירים האחרונים של לקוח ממורנינג (למשל "תמשכי מחירים של X ממורנינג"). לשמור אותם רק אחרי שאישרו.
-- ללקוח special, מוצר בלי מחיר שמור: create_order יחזיר אותו (עם last_paid אם שילם עליו בעבר). לשאול מה המחיר שלו (ולהציע את מה ששילם בפעם האחרונה או את הרגיל), לשמור עם set_price ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices. כשמאשרים הזמנה, לציין ליד כל פריט את המחיר ואם הוא מיוחד או רגיל.
+- מחירים: לפני מע״מ, לק״ג או ליחידה. create_order מסדר את המחירים לבד ולא עוצר הזמנה בגלל מחיר: מחיר שמור של הלקוח; לקוח חדש בלי מחירון מקבל את המחירים האחרונים ששילם במורנינג (ואם אין לו מסמכים, המחיר הרגיל); פריט בלי מחיר שלו מקבל את מה ששילם בפעם האחרונה או את המחיר הרגיל. *לא לשאול על מחירים.* אם create_order מחזיר price_notes, לציין אותן בקצרה.
+- רק כשהבעלים מבקש: set_price לשינוי מחיר, set_price_mode כדי לקבוע שלקוח על מחירים רגילים (regular) או מיוחדים (special), past_prices כדי לראות מה לקוח שילם במורנינג.
+- שאלות: לשאול רק שאלה קריטית, שבלעדיה אי אפשר לפתוח את ההזמנה: לקוח שלא נמצא או שמתאימים לו כמה לקוחות, מוצר שאי אפשר לזהות, אין שום יום. שאלה אחת בכל פעם, קצרה. כל השאר להחליט לבד בהיגיון ולציין בקצרה: כמות בק״ג למוצר שנמכר ביחידות → amount = הערכת מספר יחידות (לפחות 1) ו-note עם מה שביקשו ("ביקשו 1.5 ק״ג"); מוצר במשקל שהוזמן ביחידות → pieces; גודל, טווח משקל או הוראת הכנה → note של הפריט; משלוח אלא אם כתוב איסוף.
 - זיכרון קבוע: כשמלמדים אותך משהו שצריך לזכור תמיד (כלל עבודה, העדפה או פרט קבוע על לקוח), לשמור עם remember ולכתוב "אזכור: …". כשמבקשים לשנות או לשכוח משהו שזכרת, forget לישן ו-remember לחדש אם צריך. מחירים, כינויים וסוג מחירון נשמרים בכלים שלהם ולא בזיכרון. הוראה להזמנה אחת לא לזכור.
-- אחרי יצירה או עדכון: לאשר במלואו: מספר הזמנה, לקוח, יום ותאריך, פריטים וכמויות, משלוח או איסוף.
+- אחרי יצירה: לענות בקצרה, שורה אחת: "בוצע ✅ B-1050 · לקוח · יום · פריטים" (ומה שהנחת, בסוגריים). אחרי עדכון: אותו דבר עם "עודכן". פונים לשולח בלשון זכר, אלא אם ידוע אחרת.
 - פעולות שדורשות אישור (ביטול הזמנה, שינוי מחיר קיים, הוספה/הסרה של מספר מורשה, שינוי באפליקציה): הכלי שומר אותן וממתין. לכתוב בדיוק מה יקרה ולבקש להשיב "כן" לאישור. אל תכתבי שהפעולה בוצעה לפני האישור.
 - הפקה במורנינג (FIRE) ושינוי סיסמאות נעשים באפליקציה בלבד.
 - בקשה לשינוי או תיקון באפליקציה עצמה: לנסח אותה בבירור ולקרוא ל-request_app_change.
@@ -53,7 +52,9 @@ export function systemPrompt(today, catalog = [], memory = []) {
 - תשובות קצרות, בעברית, בסגנון וואטסאפ. אפשר *הדגשה*. בלי טבלאות.` +
     (catalog.length ? "\n\nקטלוג המוצרים העסקיים (id · שם · יחידה · מק״ט · מחיר רגיל לפני מע״מ). להשתמש ב-id מכאן ישירות, בלי find_products:\n" + catalog.map((p) => p.id + " · " + p.name + " · " + (p.unit === "unit" ? "יחידה" : "ק״ג") + (p.sku ? " · " + p.sku : "") + (p.list_price != null ? " · ₪" + Number(p.list_price) : "")).join("\n")
       : "\n\nהקטלוג העסקי עדיין ריק: אי אפשר ליצור הזמנות עד שמנהל לוחץ באפליקציה על הגדרות → \"סנכרון מוצרים ממורנינג\". להסביר את זה אם מבקשים הזמנה.") +
-    (memory.length ? "\n\nדברים שלימדו אותך (לפעול לפיהם תמיד, אלא אם ביקשו עכשיו אחרת). [id] בשביל forget:\n" + memory.map((m) => "[" + m.id + "] " + (m.client ? "(" + m.client + ") " : "") + m.fact).join("\n") : "");
+    (memory.length ? "\n\nדברים שלימדו אותך (לפעול לפיהם תמיד, אלא אם ביקשו עכשיו אחרת). [id] בשביל forget:\n" + memory.map((m) => "[" + m.id + "] " + (m.client ? "(" + m.client + ") " : "") + m.fact).join("\n") : "") +
+    (opts.batch ? "\n\n*מצב כמה הזמנות:* ההודעה היא הזמנה אחת מתוך הודעה עם כמה הזמנות. התשובה שלך לא נשלחת, היא נאספת לסיכום אחד. לעבוד רק על ההזמנה הזו ולפתוח אותה עם create_order בלי שאלות לא קריטיות. אחרי שנפתחה, לענות בשורה אחת בלבד: \"B-1050 · לקוח · פריטים\" (ומה שהנחת או הערות מחיר, בסוגריים קצרים). אם יש שאלה קריטית ואי אפשר לפתוח, לא לפתוח, ולענות רק בשאלה אחת קצרה שמתחילה בשם הלקוח כפי שנכתב, בלי הקדמות." : "") +
+    (opts.question ? "\n\n*שאלה פתוחה* (שאלת על הזמנה מתוך הודעה עם כמה הזמנות, ומחכה לתשובה):\nההזמנה: " + opts.question.order + "\nהשאלה: " + opts.question.question + "\nאם ההודעה עונה עליה, לפתוח את ההזמנה עם התשובה. אם אומרים לוותר עליה, skip_question. השאלה הבאה תישאל אוטומטית, לא לשאול אותה בעצמך." : "");
 }
 
 export const TOOLS = [
@@ -65,7 +66,7 @@ export const TOOLS = [
   { name: "create_order", description: "יוצר הזמנה עסקית.", input_schema: { type: "object", properties: {
     client_id: { type: "string" }, delivery_date: { type: "string", description: "YYYY-MM-DD" }, pickup: { type: "boolean" },
     items: { type: "array", items: { type: "object", properties: { product_id: { type: "string" }, amount: { type: "number" }, pieces: { type: "boolean", description: "true כשמוצר במשקל הוזמן ביחידות (\"2 יח׳ פילה סלמון\"): amount הוא מספר היחידות, ושוקלים באריזה" }, note: { type: "string", description: "הערה לפריט, למשל \"לפלט, להביא ראש ואידרה\"" } }, required: ["product_id", "amount"] } },
-    note: { type: "string" }, allow_missing_prices: { type: "boolean" } }, required: ["client_id", "delivery_date", "items"] } },
+    note: { type: "string" } }, required: ["client_id", "delivery_date", "items"] } },
   { name: "update_order", description: "משנה הזמנה עסקית: תאריך, איסוף עצמי, או רשימת פריטים חדשה במקום הקיימת (רק לפני שהתחילו לארוז).", input_schema: { type: "object", properties: {
     number: { type: "string" }, delivery_date: { type: "string" }, pickup: { type: "boolean" },
     items: { type: "array", items: { type: "object", properties: { product_id: { type: "string" }, amount: { type: "number" }, pieces: { type: "boolean", description: "true כשמוצר במשקל הוזמן ביחידות (\"2 יח׳ פילה סלמון\"): amount הוא מספר היחידות, ושוקלים באריזה" }, note: { type: "string", description: "הערה לפריט, למשל \"לפלט, להביא ראש ואידרה\"" } }, required: ["product_id", "amount"] } } }, required: ["number"] } },
@@ -75,6 +76,7 @@ export const TOOLS = [
   { name: "set_price_mode", description: "קובע את סוג המחירון של לקוח: regular (תמיד המחיר הרגיל מהקטלוג) או special (מחירים מיוחדים שנשמרים עם set_price).", input_schema: { type: "object", properties: { client_id: { type: "string" }, mode: { type: "string", enum: ["regular", "special"] } }, required: ["client_id", "mode"] } },
   { name: "remember", description: "שומר לתמיד משהו שלימדו אותך (כלל, העדפה, פרט קבוע על לקוח). client_id אם זה על לקוח מסוים.", input_schema: { type: "object", properties: { fact: { type: "string" }, client_id: { type: "string" } }, required: ["fact"] } },
   { name: "forget", description: "מוחק משהו מהזיכרון הקבוע לפי ה-id שלו (מהרשימה \"דברים שלימדו אותך\").", input_schema: { type: "object", properties: { memory_id: { type: "string" } }, required: ["memory_id"] } },
+  { name: "skip_question", description: "מוותר על השאלה הפתוחה (ההזמנה שלה לא תיפתח), למשל כשאומרים \"תדלגי\" או \"לא צריך\".", input_schema: { type: "object", properties: {} } },
   { name: "add_alias", description: "שומר כינוי ללקוח (למשל \"ברוס\") כדי לזהות אותו בהמשך.", input_schema: { type: "object", properties: { client_id: { type: "string" }, alias: { type: "string" } }, required: ["client_id", "alias"] } },
   { name: "manage_allowed_number", description: "מוסיף או מסיר מספר שמורשה לדבר עם העוזר. רק הבעלים. דורש אישור \"כן\".", input_schema: { type: "object", properties: { action: { type: "string", enum: ["add", "remove"] }, phone: { type: "string", description: "למשל 0521234567 או +972521234567" }, name: { type: "string" } }, required: ["action", "phone"] } },
   { name: "request_app_change", description: "בקשה לשנות או לתקן משהו באפליקציה. דורש אישור \"כן\".", input_schema: { type: "object", properties: { title: { type: "string" }, details: { type: "string" } }, required: ["title", "details"] } },
@@ -96,7 +98,53 @@ async function pastPrices(s, clientId) {
   try { return await s.pastPrices(clientId); } catch { return null; }
 }
 
-async function runTool(deps, phone, name, input) {
+/** A morning price this far from the regular price is probably for another unit (kg vs. piece): not saved. */
+const plausible = (price, regular) => regular == null || (price >= regular * 0.55 && price <= regular * 1.8);
+
+/** Makes sure an order's items have prices, without ever stopping the order (the owner: "בוצע" unless critical).
+ *  New client (no price list yet): his last prices from morning are saved as his prices; no documents → regular prices.
+ *  An item without his own price: what he paid last time (saved), otherwise the regular price at FIRE.
+ *  Returns short notes for Emily to mention. */
+async function settlePrices(s, clientId, items) {
+  const client = await s.getClient(clientId);
+  if (!client) throw new Error("לקוח לא נמצא");
+  const own = new Set((await s.clientPrices(clientId)).map((p) => p.product_id));
+  const catalog = await s.findProducts("");
+  const byId = Object.fromEntries(catalog.map((p) => [p.id, p]));
+  const notes = [];
+  let mode = client.price_mode || (own.size ? "special" : null);
+  let past;
+  const loadPast = async () => (past === undefined ? (past = await pastPrices(s, clientId)) : past);
+  const save = async (productId, price) => { await s.rpc("wa_set_price", { p_client: clientId, p_product: productId, p_price: price }); own.add(productId); };
+  if (!mode && (await loadPast())) {
+    if (past.prices.length) {
+      let n = 0;
+      for (const p of past.prices) if (plausible(p.price, p.regular)) { await save(p.product_id, p.price); n++; }
+      notes.push("לקוח חדש: נשמרו לו " + n + " מחירים לפי מה ששילם במורנינג");
+      mode = "special";
+    } else {
+      await s.rpc("wa_set_price_mode", { p_client: clientId, p_mode: "regular" });
+      notes.push("לקוח חדש בלי מסמכים במורנינג: מחירים רגילים");
+      mode = "regular";
+    }
+  }
+  for (const it of items) {
+    if (own.has(it.product_id)) continue;
+    const prod = byId[it.product_id];
+    if (!prod) continue;
+    const regular = prod.list_price != null ? Number(prod.list_price) : null;
+    if (mode !== "regular" && (await loadPast())) {
+      const last = past.prices.find((p) => p.product_id === it.product_id);
+      if (last && plausible(last.price, regular)) { await save(it.product_id, last.price); notes.push(prod.name + ": ₪" + last.price + " לפי מה ששילם בפעם האחרונה"); continue; }
+      if (last) notes.push(prod.name + ": במורנינג שילם ₪" + last.price + " מול רגיל ₪" + regular + ", כנראה ליחידה אחרת. נשאר הרגיל, כדאי לבדוק");
+      else if (regular != null && mode === "special") notes.push(prod.name + ": אין לו מחיר משלו, לפי הרגיל ₪" + regular);
+    }
+    if (regular == null) notes.push(prod.name + ": אין מחיר בכלל. צריך להוסיף מחיר לפני ההפקה");
+  }
+  return notes;
+}
+
+async function runTool(deps, phone, name, input, ctx = { created: [] }) {
   const s = deps.store;
   switch (name) {
     case "find_clients": return (await s.findClients(String(input.query || ""))).slice(0, 8);
@@ -106,29 +154,10 @@ async function runTool(deps, phone, name, input) {
     case "get_order": return (await s.getOrder(String(input.number || "").trim())) || { error: "הזמנה לא נמצאה" };
     case "create_order": {
       if (!isDate(input.delivery_date)) return { error: "חסר תאריך תקין" };
-      if (!input.allow_missing_prices) {
-        const client = await s.getClient(input.client_id);
-        if (!client) return { error: "לקוח לא נמצא" };
-        const prices = await s.clientPrices(input.client_id);
-        if (!client.price_mode && !prices.length) {
-          const past = await pastPrices(s, input.client_id);
-          return { error: "ask_price_mode", question: "יש ל" + client.name + " מחירים מיוחדים?", past_prices: past,
-            hint: "להראות את מה ששונה מהרגיל ולשאול. לא → set_price_mode regular. כן → set_price_mode special ולשמור את המחירים עם set_price. ואז ליצור." };
-        }
-        // regular: the client's saved price if any, else the item's regular price. special: only the client's own prices.
-        const catalog = await s.findProducts("");
-        const have = new Set(prices.map((p) => p.product_id));
-        if (client.price_mode === "regular") for (const p of catalog) if (p.list_price != null) have.add(p.id);
-        const missing = (input.items || []).filter((i) => !have.has(i.product_id)).map((i) => i.product_id);
-        if (missing.length) {
-          const past = client.price_mode === "regular" ? null : await pastPrices(s, input.client_id);
-          const paid = Object.fromEntries((past?.prices || []).map((p) => [p.product_id, p.price]));
-          const named = catalog.filter((p) => missing.includes(p.id)).map((p) => ({ name: p.name, regular_price: p.list_price != null ? Number(p.list_price) : null, ...(paid[p.id] != null ? { last_paid: paid[p.id] } : {}) }));
-          return { error: "missing_prices", missing_products: named.length ? named : missing,
-            hint: client.price_mode === "regular" ? "אין מחיר רגיל במורנינג: לשאול את המחיר ולשמור עם set_price" : "ללקוח מחירים מיוחדים: לשאול את המחיר שלו (להציע את הרגיל), לשמור עם set_price, ואז ליצור שוב" };
-        }
-      }
-      return await s.rpc("wa_create_order", { p_client: input.client_id, p_date: input.delivery_date, p_pickup: !!input.pickup, p_items: input.items || [], p_note: input.note || null });
+      const notes = await settlePrices(s, input.client_id, input.items || []);
+      const made = await s.rpc("wa_create_order", { p_client: input.client_id, p_date: input.delivery_date, p_pickup: !!input.pickup, p_items: input.items || [], p_note: input.note || null });
+      if (made?.number) ctx.created.push(made.number);
+      return notes.length ? { ...made, price_notes: notes } : made;
     }
     case "update_order": {
       const p = {};
@@ -154,6 +183,7 @@ async function runTool(deps, phone, name, input) {
       await s.setPending(phone, { action: "set_price", args: { client_id: input.client_id, product_id: input.product_id, price }, summary });
       return { needs_confirmation: true, summary, old_price: Number(current.price), new_price: price };
     }
+    case "skip_question": if (!ctx.open) return { error: "אין שאלה פתוחה" }; ctx.skipped = true; return { skipped: true };
     case "past_prices": return (await pastPrices(s, input.client_id)) || { error: "לא הצלחתי לקרוא את המסמכים ממורנינג" };
     case "set_price_mode": {
       if (!["regular", "special"].includes(input.mode)) return { error: "סוג מחירון לא תקין" };
@@ -241,6 +271,70 @@ export async function splitOrders(deps, text) {
 
 /** Longest Emily keeps working on one message before she says so (the server allows 150 s per request). */
 export const TIME_BUDGET_MS = 100_000;
+const TOO_LONG = "זה לוקח לי יותר מדי זמן, אז עצרתי באמצע. כדאי לפצל את ההודעה (למשל הזמנה אחת בכל הודעה) ולשלוח שוב. מה שכבר אישרתי נשמר.";
+
+/** The AI loop: up to 8 rounds of tool use. Returns the final text and what was done (ctx.created, ctx.skipped). */
+async function converse(deps, { id, phone }, msgs, systemText, ctx, budgetMs) {
+  const started = (deps.now || Date.now)();
+  // The fixed part (tools + rules + catalog) is cached by the API, so each turn starts faster and costs less.
+  const system = [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }];
+  for (let turn = 0; turn < 8; turn++) {
+    if ((deps.now || Date.now)() - started > budgetMs) return { text: TOO_LONG, timedOut: true };
+    // "typing…" lasts 25 seconds in WhatsApp, so show it again on every round of work
+    if (turn > 0 && deps.typing) { try { await deps.typing(id); } catch { /* only cosmetic */ } }
+    const res = await deps.claude({ model: deps.model || "claude-sonnet-5-5", max_tokens: 1200, system, tools: TOOLS, messages: msgs });
+    msgs.push({ role: "assistant", content: res.content });
+    const uses = (res.content || []).filter((b) => b.type === "tool_use");
+    if (!uses.length || res.stop_reason !== "tool_use")
+      return { text: (res.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim() };
+    // independent tools (several clients, several orders) run side by side
+    const results = await Promise.all(uses.map(async (u) => {
+      let out;
+      try { out = await runTool(deps, phone, u.name, u.input || {}, ctx); } catch (e) { out = { error: e.message || "שגיאה" }; }
+      return { type: "tool_result", tool_use_id: u.id, content: JSON.stringify(out ?? null) };
+    }));
+    msgs.push({ role: "user", content: results });
+  }
+  return { text: "מצטער, משהו השתבש. נסו לנסח שוב." };
+}
+
+async function context(s) {
+  let catalog = [], memory = [];
+  try { catalog = await s.findProducts(""); } catch { /* the AI can still search */ }
+  try { memory = s.memory ? await s.memory() : []; } catch { /* answer without it rather than not at all */ }
+  return { catalog, memory };
+}
+
+/** How a waiting question is shown: the question, and how many more come after it. */
+export const questionText = (q) => "❓ " + q.question + (q.remaining ? "\n(אחרי זו יש עוד " + q.remaining + (q.remaining === 1 ? " שאלה)" : " שאלות)") : "");
+
+/** The one message sent after all the orders of a multi-order message were handled:
+ *  "בוצע ✅" with a line per opened order, then the first critical question (the others follow one by one). */
+export function batchSummary(parts) {
+  const done = parts.filter((p) => p.result === "done"), open = parts.filter((p) => p.result !== "done");
+  let t = done.length
+    ? "בוצע ✅ " + (open.length ? done.length + " מתוך " + parts.length + " הזמנות" : done.length === 1 ? "הזמנה אחת" : done.length + " הזמנות") + ":\n" + done.map((p) => "• " + p.result_text).join("\n")
+    : "עוד לא נפתחה אף הזמנה.";
+  if (open.length) t += "\n\n" + questionText({ question: open[0].result_text, remaining: open.length - 1 });
+  return t;
+}
+
+/** One order out of a message with several: worked on alone (no chat history, so other orders cannot get mixed in),
+ *  and nothing is sent. Returns {status: "done", text: one line} when the order was opened, else
+ *  {status: "question", text: the one critical question}. */
+export async function handleBatchPart(deps, { id, phone, text }) {
+  const s = deps.store;
+  const { catalog, memory } = await context(s);
+  const ctx = { created: [] };
+  const out = await converse(deps, { id, phone: normalizePhone(phone) }, [{ role: "user", content: text }],
+    systemPrompt(deps.today(), catalog, memory, { batch: true }), ctx, deps.batchBudgetMs ?? 60_000);
+  let line = String(out.text || "").replace(/^בוצע\s*✅?\s*/, "").split("\n").filter((l) => l.trim()).join(" · ").slice(0, 300);
+  if (ctx.created.length) {
+    if (!ctx.created.every((n) => line.includes(n))) line = ctx.created.join(", ") + " · " + line;
+    return { status: "done", text: line };
+  }
+  return { status: "question", text: out.timedOut ? "לא הספקתי לפתוח את ההזמנה: \"" + text.slice(0, 80) + "\". לשלוח אותה שוב?" : line || "לא הצלחתי לפתוח את ההזמנה: \"" + text.slice(0, 80) + "\"" };
+}
 
 /** Handles one incoming text message. Returns the reply sent (or null when nothing was sent).
  *  With {received: true} the message was already checked and saved by receive();
@@ -249,7 +343,6 @@ export async function handleMessage(deps, { id, phone, text }, { received = fals
   const s = deps.store;
   phone = normalizePhone(phone);
   if (!received && !(await receive(deps, { id, phone, text }))) return null;
-  const started = (deps.now || Date.now)();
   const reply = async (t) => { await deps.send(phone, t); await s.saveOutgoing(phone, t); return t; };
 
   const pending = await s.getPending(phone);
@@ -278,30 +371,17 @@ export async function handleMessage(deps, { id, phone, text }, { received = fals
     else msgs.push({ role: "user", content: text });
   } else if (!msgs.length || msgs[msgs.length - 1].role !== "user") msgs.push({ role: "user", content: text });
 
-  let catalog = [], memory = [];
-  try { catalog = await s.findProducts(""); } catch { /* the AI can still search */ }
-  try { memory = s.memory ? await s.memory() : []; } catch { /* answer without it rather than not at all */ }
-  // The fixed part (tools + rules + catalog) is cached by the API, so each turn starts faster and costs less.
-  const system = [{ type: "text", text: systemPrompt(deps.today(), catalog, memory), cache_control: { type: "ephemeral" } }];
-  for (let turn = 0; turn < 8; turn++) {
-    if ((deps.now || Date.now)() - started > (deps.budgetMs ?? TIME_BUDGET_MS))
-      return reply("זה לוקח לי יותר מדי זמן, אז עצרתי באמצע. כדאי לפצל את ההודעה (למשל הזמנה אחת בכל הודעה) ולשלוח שוב. מה שכבר אישרתי נשמר.");
-    // "typing…" lasts 25 seconds in WhatsApp, so show it again on every round of work
-    if (turn > 0 && deps.typing) { try { await deps.typing(id); } catch { /* only cosmetic */ } }
-    const res = await deps.claude({ model: deps.model || "claude-sonnet-5-5", max_tokens: 1200, system, tools: TOOLS, messages: msgs });
-    msgs.push({ role: "assistant", content: res.content });
-    const uses = (res.content || []).filter((b) => b.type === "tool_use");
-    if (!uses.length || res.stop_reason !== "tool_use") {
-      const out = (res.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-      return out ? reply(out) : null;
-    }
-    const results = [];
-    for (const u of uses) {
-      let out;
-      try { out = await runTool(deps, phone, u.name, u.input || {}); } catch (e) { out = { error: e.message || "שגיאה" }; }
-      results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(out ?? null) });
-    }
-    msgs.push({ role: "user", content: results });
+  const { catalog, memory } = await context(s);
+  // a critical question Emily asked about one order of a multi-order message, still waiting for its answer
+  const open = s.openQuestion ? await s.openQuestion(phone).catch(() => null) : null;
+  const ctx = { created: [], open };
+  const out = await converse(deps, { id, phone }, msgs, systemPrompt(deps.today(), catalog, memory, { question: open }), ctx, deps.budgetMs ?? TIME_BUDGET_MS);
+  let t = out.text;
+  // the question was answered (its order is now open) or dropped: ask the next one, if any
+  if (open && (ctx.created.length || ctx.skipped)) {
+    await s.resolveQuestion(open.id);
+    const next = await s.nextQuestion(phone);
+    if (next) t = (t ? t + "\n\n" : "") + questionText(next);
   }
-  return reply("מצטער, משהו השתבש. נסו לנסח שוב.");
+  return t ? reply(t) : null;
 }
