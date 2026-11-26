@@ -19,7 +19,7 @@ with sync_playwright() as p:
     pg.wait_for_selector(".big.private")
     pg.click(".big.private")
     days = pg.locator(".dayhead .lbl").all_inner_texts()
-    check(days[0].startswith("באיחור"), "overdue section first: " + days[0].replace("\n", " "))
+    check(days[0].startswith("היסטוריה") and days[1].startswith("באיחור"), "history on top, then overdue: " + " | ".join(d.replace("\n", " ") for d in days[:2]))
     card = pg.locator("section.day:not(.overdue) .card").first
     cid = card.get_attribute("id")
     card.locator(".packbox").click()
@@ -135,6 +135,16 @@ with sync_playwright() as p:
     while pg.locator(".dayhead[aria-expanded='false']").count(): pg.locator(".dayhead[aria-expanded='false']").first.click(); pg.wait_for_timeout(100)
     if pg.locator("#card-o-B1003.open").count() == 0: pg.locator("#card-o-B1003 .info").click()
     check("הוזמנו 2 יח׳ · לשקילה" in pg.inner_text("#card-o-B1003"), "business item ordered in pieces shows as pieces to weigh")
+    # history above the overdue section: last 7 days by default, read only
+    check(pg.locator(".day.hist").count() == 1 and pg.locator(".day.hist").evaluate("e => e.nextElementSibling && true"), "history section sits at the top of the list")
+    if pg.get_attribute("[data-act='hist-toggle:business']", "aria-expanded") != "true": pg.click("[data-act='hist-toggle:business']")
+    pg.wait_for_timeout(300)
+    check(pg.locator("#hcard-o-B1000").count() == 1 and pg.locator(".day:not(.hist) #card-o-B1000").count() == 0, "history shows last week's order (and the main list does not)")
+    pg.click("#hcard-o-B1000 .info"); pg.wait_for_timeout(200)
+    check("נארז 4.125 ק״ג" in pg.inner_text("#hcard-o-B1000"), "weights show three decimals")
+    pg.fill("#hf-business", "2020-01-01"); pg.fill("#ht-business", "2020-01-02"); pg.click("[data-act='hist-load:business']"); pg.wait_for_timeout(300)
+    check("אין הזמנות בתאריכים האלה" in pg.inner_text(".day.hist"), "history date range can be changed")
+    pg.click("[data-act='hist-toggle:business']"); pg.wait_for_timeout(200)
     fc = "#card-o-B1001"
     if pg.locator(fc + ".open").count() == 0: pg.locator(fc + " .info").click()
     for i in range(pg.locator(fc + " .winput").count()):

@@ -68,6 +68,10 @@ export function demoSeed(today = todayIL()) {
   const o = orders.find((x) => x.number === "984");
   o.order_items[0].final_amount = 0.21; o.order_items[1].final_amount = 0.32;
   o.order_items.forEach((i) => (i.confirmed = true)); o.status = "packed"; o.packed_at = new Date().toISOString();
+  // history: an order delivered a few days ago (packed), so the history view has something to show
+  biz(1000, addDays(today, -3), "c1", [["פילה סלמון נורווגי", 4]]);
+  const past = orders.find((x) => x.number === "B-1000");
+  past.order_items[0].final_amount = 4.125; past.order_items[0].confirmed = true; past.status = "packed";
   const prices = [
     ["c1", "פילה סלמון נורווגי", 128], ["c1", "סשימי טונה אדומה", 360], ["c2", "פילה לברק", 205],
     ["c3", "סשימי טונה אדומה", 365], ["c3", "סשימי סלמון", 185],
@@ -101,6 +105,10 @@ export class DemoBackend {
       prices: admin ? this.db.prices : [],
       review: admin ? this.db.review.filter((r) => r.status === "review") : [],
     });
+  }
+  async loadHistory(kind, from, to) {
+    return clone(this.db.orders.filter((o) => !o.deleted_at && o.kind === kind && o.delivery_date >= from && o.delivery_date <= to)
+      .sort((a, b) => (a.delivery_date < b.delivery_date ? 1 : -1)));
   }
   async loadLog() { if (this.role !== "admin") fail("פעולה למנהל בלבד"); return clone(this.db.log); }
 

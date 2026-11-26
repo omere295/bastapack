@@ -27,7 +27,7 @@ const TODAY = () => todayIL();
 /* ---------- helpers ---------- */
 const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n, dp) => (Math.round(n * 1000) / 1000).toLocaleString("he-IL", { minimumFractionDigits: dp ?? 0, maximumFractionDigits: dp ?? 3 });
-const kg = (n) => fmt(Number(n), Number(n) < 10 ? 2 : 1);
+const kg = (n) => fmt(Number(n), 3); // weights always to the gram: 0.520
 const fullAddr = (a) => !a ? "" : [a.street && (a.street + (a.building ? " " + a.building : "")), a.entrance && ("כניסה " + a.entrance), a.floor && a.floor !== "0" && ("קומה " + a.floor), a.apt && ("דירה " + a.apt), a.city].filter(Boolean).join(", ");
 const reduced = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const holidays = () => (D ? D.holidays.map((h) => h.day) : []);
@@ -273,6 +273,7 @@ function renderSection(kind) {
     if (ui.selectMode) h += '<button class="btn small" data-act="selall:' + kind + '">בחירת כל ה' + (kind === "private" ? "פרטיות" : "עסקיות") + "</button>";
   }
   h += '<span class="grow"></span><div class="seg" role="group" aria-label="מעבר בין חלקים"><button data-act="go:private" aria-pressed="' + (kind === "private") + '">פרטי</button><button data-act="go:business" aria-pressed="' + (kind === "business") + '">עסקי</button></div></div>';
+  h += renderHistory(kind);
   if (!groups.length) h += '<div class="empty">אין הזמנות פתוחות</div>';
   for (const g of groups) {
     const open = dayIsOpen(kind, g.key);
@@ -296,6 +297,54 @@ function renderSection(kind) {
     h += "</section>";
   }
   return h + "</div>";
+}
+
+/* ---------- history: past orders by date range (read only) ---------- */
+async function loadHistory(kind) {
+  const st = histState(kind);
+  if (st.from > st.to) { st.error = "תאריך ההתחלה אחרי תאריך הסיום"; render(); return; }
+  st.loading = true; st.error = ""; render();
+  try { st.orders = await B.loadHistory(kind, st.from, st.to); }
+  catch (e) { st.error = e.message || "לא הצלחתי לטעון את ההיסטוריה"; }
+  st.loading = false; render();
+}
+function histState(kind) {
+  return (ui.hist ||= {})[kind] ||= { open: false, from: addDays(TODAY(), -7), to: addDays(TODAY(), -1), orders: null, loading: false, error: "" };
+}
+function renderHistory(kind) {
+  const st = histState(kind);
+  let h = '<section class="day hist ' + (st.open ? "" : "closed") + '"><button class="dayhead" data-act="hist-toggle:' + kind + '" aria-expanded="' + st.open + '"><span class="chev">' + CHEV + '</span><span class="lbl"><span class="rel">היסטוריה</span><span class="num">' +
+    (st.open ? esc(dayParts(st.from).base) + " – " + esc(dayParts(st.to).base) : "הזמנות קודמות") + "</span></span>" +
+    (st.orders ? '<span class="cnt num">' + st.orders.length + " הזמנות</span>" : "") + "</button>";
+  if (st.open) {
+    h += '<div class="rowform histbar"><div class="field"><label for="hf-' + kind + '">מתאריך</label><input type="date" id="hf-' + kind + '" value="' + esc(st.from) + '"></div>' +
+      '<div class="field"><label for="ht-' + kind + '">עד תאריך</label><input type="date" id="ht-' + kind + '" value="' + esc(st.to) + '"></div>' +
+      '<button class="btn small sea" data-act="hist-load:' + kind + '">' + (st.loading ? "טוען…" : "הצגה") + "</button></div>";
+    if (st.error) h += '<div class="msg bad">' + esc(st.error) + "</div>";
+    else if (st.orders && !st.orders.length) h += '<div class="empty">אין הזמנות בתאריכים האלה</div>';
+    else if (st.orders) {
+      const byDay = {};
+      for (const o of st.orders) (byDay[o.delivery_date] ||= []).push(o);
+      for (const d of Object.keys(byDay).sort().reverse()) {
+        const p = dayParts(d);
+        h += '<div class="subhead">' + esc((p.rel ? p.rel + " · " : "") + p.base) + " · " + byDay[d].length + " הזמנות</div><div class=\"list\">" + sortDay(byDay[d]).map(renderHistCard).join("") + "</div>";
+      }
+    }
+  }
+  return h + "</section>";
+}
+const HIST_STATUS = { new: "לא נארזה", packed: "ארוזה", fired: "הופקה" };
+function renderHistCard(o) {
+  const open = ui.open.has("h:" + o.id);
+  const c = o.kind === "business" ? client(o.client_id) : null;
+  const its = o.order_items.filter((i) => !i.removed_at).sort((a, b) => a.position - b.position);
+  let h = '<article class="card hcard ' + (open ? "open" : "") + (o.status === "new" ? "" : " packed") + '" id="hcard-' + o.id + '"><div class="ch nosel"><button class="info" data-act="htoggle:' + o.id + '" aria-expanded="' + open + '"><span class="l1">' +
+    '<span class="onum num">' + (o.kind === "private" ? "#" : "") + esc(o.number) + '</span><span class="oname">' + esc(c ? c.business_name : o.customer_name) + "</span>" +
+    '<span class="chip ' + (o.status === "new" ? "warn" : "ok") + '">' + (HIST_STATUS[o.status] || esc(o.status)) + "</span>" + (o.pickup ? '<span class="chip pick">איסוף עצמי</span>' : "") +
+    (o.morning_doc_number ? '<span class="chip sea num">מורנינג #' + esc(o.morning_doc_number) + "</span>" : "") + '</span><span class="l2"><span>' + its.length + " פריטים</span></span></button></div>";
+  if (open) h += '<div class="hitems">' + its.map((it) => '<div class="hitem"><span>' + esc(it.name) + (it.note ? ' <span class="muted">(' + esc(it.note) + ")</span>" : "") + '</span><span class="num">' +
+    (it.added_during_packing ? "נוסף באריזה" : it.unit === "kg" && it.ordered_kg == null && it.ordered_count ? "הוזמנו " + fmt(Number(it.ordered_count)) + " יח׳" : "הוזמן " + amtText(it, orderedAmount(it) || 0)) + (it.confirmed ? " · נארז " + amtText(it, it.final_amount) : "") + "</span></div>").join("") + "</div>";
+  return h + "</article>";
 }
 
 function renderCard(o) {
@@ -845,6 +894,9 @@ document.addEventListener("click", (e) => {
     case "logout": logout(); break;
     case "go": ui.screen = b; if (b === "home") ui.selectMode = false; if (b === "log") ui.log = null; window.scrollTo(0, 0); render(); break;
     case "day": { const key = rest.slice(b.length + 1); ui.dayOpen[b + ":" + key] = !dayIsOpen(b, key); render(); break; }
+    case "hist-toggle": { const st = histState(b); st.open = !st.open; render(); if (st.open && !st.orders) loadHistory(b); break; }
+    case "hist-load": { const st = histState(b); st.from = gv("hf-" + b) || st.from; st.to = gv("ht-" + b) || st.to; loadHistory(b); break; }
+    case "htoggle": { const k = "h:" + b; if (ui.open.has(k)) ui.open.delete(k); else ui.open.add(k); render(); break; }
     case "toggle": if (ui.open.has(b)) ui.open.delete(b); else { ui.open.add(b); ui.opening = b; } render(); break;
     case "ok": confirmItem(b, c); break;
     case "pack": tryPack(b); break;

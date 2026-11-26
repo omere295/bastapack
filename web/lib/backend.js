@@ -105,6 +105,11 @@ export class SupabaseBackend {
     return out;
   }
 
+  /** Past orders of one kind between two dates (inclusive), newest day first. Read only. */
+  loadHistory(kind, from, to) {
+    return this._all("/rest/v1/orders?select=*,order_items(*)&deleted_at=is.null&kind=eq." + kind + "&delivery_date=gte." + from + "&delivery_date=lte." + to + "&order=delivery_date.desc,number");
+  }
+
   loadLog() { return this._req("/rest/v1/activity_log?select=*&order=at.desc&limit=200"); }
 
   rpc(name, args) { return this._req("/rest/v1/rpc/" + name, { method: "POST", body: args }); }

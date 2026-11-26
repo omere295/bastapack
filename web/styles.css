@@ -305,3 +305,10 @@ html, body { height: 100%; margin: 0; }
 .picklist { display: grid; gap: 4px; margin-top: 6px; max-height: 280px; overflow: auto; }
 .clientpick { text-align: start; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .clientpick:hover { border-color: var(--sea); }
+
+/* history (past orders, read only) */
+.day.hist .dayhead .rel { color: var(--muted); }
+.histbar { padding: 8px 12px 4px; align-items: flex-end; }
+.histbar input[type="date"] { min-width: 150px; }
+.hcard .hitems { padding: 4px 14px 12px; display: grid; gap: 6px; }
+.hcard .hitem { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 6px; }

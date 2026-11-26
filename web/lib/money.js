@@ -71,6 +71,6 @@ export function parseAmount(raw, unit) {
   const v = Number(s);
   if (!Number.isFinite(v)) return { error: "מספר לא תקין" };
   if (unit === "unit" && (!Number.isInteger(v) || v < 0)) return { error: "כמות צריכה להיות מספר שלם" };
-  if (unit === "kg" && (v <= 0 || v > 200)) return { error: "משקל בין 0.01 ל-200 ק״ג" };
+  if (unit === "kg" && (v <= 0 || v > 200)) return { error: "משקל בין 0.001 ל-200 ק״ג" };
   return { value: v };
 }
