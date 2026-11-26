@@ -236,9 +236,11 @@ export class DemoBackend {
       if (!o || o.kind !== "business") fail("ההזמנה לא נמצאה");
       if (o.status === "fired") fail("ההזמנה כבר הופקה");
       if (o.status !== "packed") fail("יש לארוז את ההזמנה לפני ההפקה");
-      const prices = this.db.prices.filter((p) => p.client_id === o.client_id).map((p) => p.product_id);
+      // same rule as the morning function: the client's price, otherwise the item's regular price
+      const prices = this.db.prices.filter((p) => p.client_id === o.client_id).map((p) => p.product_id)
+        .concat(this.db.products.filter((p) => p.list_price != null).map((p) => p.id));
       const missing = o.order_items.filter((i) => !i.removed_at && !prices.includes(i.product_id)).map((i) => i.name);
-      if (missing.length) fail("חסר מחיר שמור ללקוח עבור: " + missing.join(", "));
+      if (missing.length) fail("חסר מחיר (ללקוח וגם במורנינג) עבור: " + missing.join(", "));
       o.status = "fired"; o.morning_doc_number = String(40000 + this.db.log.length); o.morning_doc_url = null;
       this._log("fired", o, { doc: o.morning_doc_number });
       return { number: o.morning_doc_number, url: null };

@@ -37,7 +37,7 @@ export function systemPrompt(today, catalog = []) {
 - אם לא נאמר יום, תמיד לשאול לאיזה יום. לא לנחש.
 - לקוח: לחפש עם find_clients. אם יש כמה התאמות או אף אחת, לשאול ("לא מצאתי את ברוס במורנינג, אולי ברוס בורגר בע״מ?"). כשמתברר כינוי חדש ללקוח, לשמור אותו עם add_alias.
 - מוצרים: רק מהקטלוג העסקי (הפריטים במורנינג). אפשר לזהות מוצר גם לפי מק״ט. אם מוצר לא קיים בקטלוג, לא להמציא: להציע את הקרובים או לבקש להוסיף אותו במורנינג ולסנכרן. כמות בק״ג למוצרי משקל, ביחידות למוצרי יחידה. מוצר במשקל שהוזמן ביחידות ("2 יח׳ פילה סלמון"): amount = מספר היחידות עם pieces=true, ושוקלים באריזה. הוראות לפריט ("לפלט", "להביא ראש ואידרה") נכנסות ל-note של אותו פריט.
-- מחירים: לפני מע״מ, לק״ג או ליחידה. אם ללקוח אין מחיר שמור למוצר, create_order יחזיר אילו מחירים חסרים: לשאול את המחיר ולשמור עם set_price, ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices.
+- מחירים: לפני מע״מ, לק״ג או ליחידה. לכל לקוח המחיר שלו אם שמור (get_client_prices), ואם לא, המחיר הרגיל של המוצר מהקטלוג (₪ בקטלוג). לא לשאול על מחיר כשיש מחיר רגיל. רק אם אין גם מחיר רגיל, create_order יחזיר אילו מחירים חסרים: לשאול ולשמור עם set_price, ואז ליצור. אם אומרים "אחר כך", ליצור עם allow_missing_prices. כשמאשרים הזמנה, לציין ליד כל פריט אם המחיר הוא של הלקוח או הרגיל.
 - אחרי יצירה או עדכון: לאשר במלואו: מספר הזמנה, לקוח, יום ותאריך, פריטים וכמויות, משלוח או איסוף.
 - פעולות שדורשות אישור (ביטול הזמנה, שינוי מחיר קיים, הוספה/הסרה של מספר מורשה, שינוי באפליקציה): הכלי שומר אותן וממתין. לכתוב בדיוק מה יקרה ולבקש להשיב "כן" לאישור. אל תכתבי שהפעולה בוצעה לפני האישור.
 - הפקה במורנינג (FIRE) ושינוי סיסמאות נעשים באפליקציה בלבד.
@@ -45,7 +45,7 @@ export function systemPrompt(today, catalog = []) {
 - כשמציגים את עצמך או שואלים מי את: "אמילי, העוזרת של בסטה דגים". מדברים עלייך בלשון נקבה.
 - כשצריך כמה חיפושים או פעולות שלא תלויים זה בזה (למשל כמה לקוחות או כמה הזמנות בהודעה אחת), להפעיל את כל הכלים באותו תור, ביחד.
 - תשובות קצרות, בעברית, בסגנון וואטסאפ. אפשר *הדגשה*. בלי טבלאות.` +
-    (catalog.length ? "\n\nקטלוג המוצרים העסקיים (id · שם · יחידה · מק״ט). להשתמש ב-id מכאן ישירות, בלי find_products:\n" + catalog.map((p) => p.id + " · " + p.name + " · " + (p.unit === "unit" ? "יחידה" : "ק״ג") + (p.sku ? " · " + p.sku : "")).join("\n")
+    (catalog.length ? "\n\nקטלוג המוצרים העסקיים (id · שם · יחידה · מק״ט · מחיר רגיל לפני מע״מ). להשתמש ב-id מכאן ישירות, בלי find_products:\n" + catalog.map((p) => p.id + " · " + p.name + " · " + (p.unit === "unit" ? "יחידה" : "ק״ג") + (p.sku ? " · " + p.sku : "") + (p.list_price != null ? " · ₪" + Number(p.list_price) : "")).join("\n")
       : "\n\nהקטלוג העסקי עדיין ריק: אי אפשר ליצור הזמנות עד שמנהל לוחץ באפליקציה על הגדרות → \"סנכרון מוצרים ממורנינג\". להסביר את זה אם מבקשים הזמנה.");
 }
 
@@ -90,11 +90,13 @@ async function runTool(deps, phone, name, input) {
     case "create_order": {
       if (!isDate(input.delivery_date)) return { error: "חסר תאריך תקין" };
       if (!input.allow_missing_prices) {
+        // a price is missing only when the client has none saved and the item has no regular price either
         const prices = await s.clientPrices(input.client_id);
-        const have = new Set(prices.map((p) => p.product_id));
+        const catalog = await s.findProducts("");
+        const have = new Set([...prices.map((p) => p.product_id), ...catalog.filter((p) => p.list_price != null).map((p) => p.id)]);
         const missing = (input.items || []).filter((i) => !have.has(i.product_id)).map((i) => i.product_id);
         if (missing.length) {
-          const names = (await s.findProducts("")).filter((p) => missing.includes(p.id)).map((p) => p.name);
+          const names = catalog.filter((p) => missing.includes(p.id)).map((p) => p.name);
           return { error: "missing_prices", missing_products: names.length ? names : missing, hint: "לשאול את המחיר, לשמור עם set_price, ואז ליצור שוב" };
         }
       }

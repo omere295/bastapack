@@ -109,14 +109,16 @@ async function syncItems() {
 async function fire(orderId: string) {
   await rpc("claim_fire", { p_order: orderId });
   try {
-    const [o] = await db("/rest/v1/orders?id=eq." + orderId + "&select=*,order_items(*,products(morning_item_id,sku)),clients(*)");
+    const [o] = await db("/rest/v1/orders?id=eq." + orderId + "&select=*,order_items(*,products(morning_item_id,sku,list_price)),clients(*)");
     const c = o.clients;
     if (!c?.morning_id) throw new UserError("הלקוח לא מקושר למורנינג. הריצו סנכרון לקוחות בהגדרות.");
     const prices = await db("/rest/v1/client_prices?client_id=eq." + c.id + "&select=product_id,price");
     const priceOf: Record<string, number> = Object.fromEntries(prices.map((p: any) => [p.product_id, Number(p.price)]));
     const items = o.order_items.filter((i: any) => !i.removed_at).sort((a: any, b: any) => a.position - b.position);
+    // no price saved for this client: the item's regular price from morning
+    for (const i of items) if (priceOf[i.product_id] == null && i.products?.list_price != null) priceOf[i.product_id] = Number(i.products.list_price);
     const missing = items.filter((i: any) => priceOf[i.product_id] == null).map((i: any) => i.name);
-    if (missing.length) throw new UserError("חסר מחיר שמור ללקוח עבור: " + missing.join(", "));
+    if (missing.length) throw new UserError("חסר מחיר (ללקוח וגם במורנינג) עבור: " + missing.join(", "));
     if (items.some((i: any) => !i.confirmed)) throw new UserError("יש פריטים בלי משקל סופי");
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
     const doc = await morning("/documents", {

@@ -185,6 +185,18 @@ test("several orders in one message are spotted and split; a single order is lef
   assert.deepEqual(await splitOrders(bad.deps, two), [two], "unclear answer keeps the message whole");
 });
 
+test("an item with a regular price needs no client price", async () => {
+  const w = fakeWorld([
+    use("create_order", { client_id: "c1", delivery_date: "2026-11-24", items: [{ product_id: "p-tuna", amount: 2 }] }),
+    say("בוצע"),
+  ]);
+  const base = w.store.findProducts;
+  w.store.findProducts = async (q) => (await base(q)).map((p) => (p.id === "p-tuna" ? { ...p, list_price: 340 } : p));
+  await handleMessage(w.deps, { id: "m1", phone: OWNER, text: "2 קילו טונה לברוס למחר" });
+  assert.equal(w.rpcCalls[0][0], "wa_create_order");
+  assert.match(w.claudeCalls[0].system[0].text, /p-tuna · טונה · ק״ג · ₪340/);
+});
+
 test("the prompt tells the AI today's date and the coming days", () => {
   const p = systemPrompt("2026-11-23");
   assert.match(p, /שני 2026-11-23/);

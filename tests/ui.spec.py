@@ -154,6 +154,10 @@ with sync_playwright() as p:
     pg.locator(fc + " .firemini").click()
     pg.click(".modal [data-act='m-fire']"); pg.wait_for_timeout(400)
     check("הופקה" in pg.inner_text(fc), "FIRE creates the delivery note and locks the order")
+    # B-1002 (ביסטרו אלנבי) has no saved price for the ponzu sauce: the regular morning price (₪18) is used
+    if pg.locator("#card-o-B1002.open").count() == 0: pg.locator("#card-o-B1002 .info").click()
+    pg.wait_for_timeout(200)
+    check("אין מחיר שמור" not in pg.inner_text("#card-o-B1002") and "18" in pg.inner_text("#card-o-B1002"), "no client price: the item's regular price is used")
     # employee view
     pg.click("text=יציאה"); pg.fill("#lu", "basta"); pg.fill("#lp", "1234"); pg.click("button[type=submit]")
     pg.wait_for_selector(".big.private"); pg.click(".big.private")

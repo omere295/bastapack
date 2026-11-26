@@ -45,7 +45,9 @@ const unitLbl = (it) => (it.unit === "kg" ? "ק״ג" : "יח׳");
 const amtText = (it, v) => (it.unit === "kg" ? kg(v) + " ק״ג" : fmt(Number(v)) + " יח׳");
 const orderDiff = (o) => (o.kind === "private" ? privateOrderDiff(o.order_items, D.productsById) : 0);
 const itemDiff = (o, it) => (o.kind === "private" ? privateItemDiff(it, D.productsById[it.product_id]) : 0);
-const unitPrice = (o, it) => (o.kind === "private" ? privateUnitPrice(it, D.productsById[it.product_id]) : (D.priceMap[o.client_id] || {})[it.product_id] ?? null);
+/** Business prices for a client: the client's own price where saved, otherwise the item's regular price from morning. */
+const bizPrices = (cid) => ({ ...(D.listPrices || {}), ...(D.priceMap[cid] || {}) });
+const unitPrice = (o, it) => (o.kind === "private" ? privateUnitPrice(it, D.productsById[it.product_id]) : bizPrices(o.client_id)[it.product_id] ?? null);
 /** Up to `limit` clients matching the search text (name, company, ח.פ., phone or nickname). Empty search: clients with a price list. */
 function clientMatches(q, limit = 25) {
   const t = String(q || "").trim().toLowerCase();
@@ -53,7 +55,7 @@ function clientMatches(q, limit = 25) {
   if (!t) return list.filter((c) => D.priceMap[c.id]).slice(0, limit);
   return list.filter((c) => [c.business_name, c.legal_name, c.company_number, c.phone, ...(c.aliases || [])].some((x) => x && String(x).toLowerCase().includes(t))).slice(0, limit);
 }
-const bizTotal = (o) => businessTotal(o.order_items, D.priceMap[o.client_id] || {});
+const bizTotal = (o) => businessTotal(o.order_items, bizPrices(o.client_id));
 
 let toastTimer = null;
 function toast(msg) { ui.toast = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { ui.toast = null; render(); }, 3000); }
@@ -68,6 +70,8 @@ function index(data) {
   data.clientsById = Object.fromEntries(data.clients.map((c) => [c.id, c]));
   data.priceMap = {};
   for (const r of data.prices) (data.priceMap[r.client_id] ||= {})[r.product_id] = Number(r.price);
+  data.listPrices = {};
+  for (const p of data.products) if (p.catalog === "business" && p.list_price != null) data.listPrices[p.id] = Number(p.list_price);
   return data;
 }
 let loading = null;
@@ -711,7 +715,7 @@ function renderModal() {
       items(o).map((it) => { const p = unitPrice(o, it); const amt = it.confirmed ? it.final_amount : orderedAmount(it); return "<tr><td>" + esc(it.name) + '</td><td class="num">' + amtText(it, amt) + '</td><td class="num">' + (p == null ? '<span class="chip warn">חסר</span>' : nis(p)) + '</td><td class="num">' + (p == null ? "" : nis(round2(amt * p))) + "</td></tr>"; }).join("") +
       '</tbody></table></div><div class="total num">סה״כ לפני מע״מ: <b>' + nis(bt.total) + "</b></div>" +
       (!isPacked(o) ? '<div class="msg bad">יש לארוז את ההזמנה לפני ההפקה.</div>' : "") +
-      (bt.missing.length ? '<div class="msg bad">חסר מחיר שמור ללקוח עבור: ' + esc(bt.missing.join(", ")) + '. הוסיפו מחיר ב"פרטי הזמנה".</div>' : "") +
+      (bt.missing.length ? '<div class="msg bad">אין מחיר ללקוח וגם לא מחיר רגיל במורנינג עבור: ' + esc(bt.missing.join(", ")) + '. הוסיפו מחיר ב"פרטי הזמנה".</div>' : "") +
       (!c.morning_id ? '<div class="msg bad">הלקוח לא מקושר למורנינג. הריצו "סנכרון לקוחות ממורנינג" בהגדרות.</div>' : "") +
       (m.err ? '<div class="msg bad">' + esc(m.err) + "</div>" : "") +
       '<p>ההפקה יוצרת תעודת משלוח אמיתית במורנינג ונועלת את ההזמנה.</p>' +
@@ -720,7 +724,7 @@ function renderModal() {
     const c = client(m.cid);
     h += '<h3 id="m-title">מחירון · ' + esc(c.business_name) + '</h3><p>מחיר לפני מע״מ, לק״ג או ליחידה. נשמר עד שמשנים אותו.</p><div class="pricegrid">' +
       (catalog("business").length ? "" : '<p class="msg info">' + esc(NO_BIZ_PRODUCTS) + "</p>") +
-      catalog("business").map((p) => { const v = (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(prodLabel(p)) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="—">'; }).join("") +
+      catalog("business").map((p) => { const v = (D.priceMap[m.cid] || {})[p.id]; return '<label for="cp-' + p.id + '">' + esc(prodLabel(p)) + " <span class=\"muted\">(" + (p.unit === "kg" ? "ק״ג" : "יח׳") + ')</span></label><input id="cp-' + p.id + '" data-cprice="' + p.id + '" inputmode="decimal" value="' + esc(v ?? "") + '" placeholder="' + (p.list_price != null ? "רגיל " + esc(String(Number(p.list_price))) : "—") + '">'; }).join("") +
       "</div>" + (m.err ? '<div class="err">' + esc(m.err) + "</div>" : "") + '<div class="mact"><button class="btn primary" data-act="m-prices">שמירה</button><button class="btn" data-act="m-close">ביטול</button></div>';
   } else if (m.type === "form") h += renderOrderForm(m);
   return h + "</div></div>";
